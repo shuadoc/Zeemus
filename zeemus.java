@@ -9,65 +9,78 @@ import java.util.*;
 
 public class Zeemus extends AdvancedRobot
 {
-	zRobot target;
-	zRobotList bots = new zRobotList();
+	
+	zRobotList robotList = new zRobotList();
 		
-	public void run() {
+	public void run() 
+	{
 		
-//		trackName = null;
-		
-		while(true) {
+		while(true)
+		{
 			
 			setAdjustRadarForGunTurn(true);
 			setAdjustGunForRobotTurn(true);
 			
 			//spin in a circle and scan
-		//	setBack(40000);
-		//	setTurnRight(90);
+			setBack(40000);
+			setTurnRight(90);
 			refresh();
+			if(getGunHeat()<.1)
+				aimFire(robotList.getTarget());
 			
-			target = bots.getTarget();
-			aimFire(target);
-			
-		/*	getBattleFieldWidth();
-			getBattleFieldHeight();
-			getX();
-			getY();
-			*/
 		}
 		
 	}
 	
-	public void aimFire(zRobot target)
-	{
-		double deg = target.zbearing;
-		turnGunRight(deg);
-		fire(1);
-	}
-	
-	
+
 	//When scanning a robot, just tell the zRobotList to deal with it
-	public void onScannedRobot(ScannedRobotEvent e) {
-		bots.zOnScan(e);
+	public void onScannedRobot(ScannedRobotEvent e) 
+	{
+		
+		robotList.logRobot(e, getX(), getY(), getHeading());
 	}
 	
-	public void onHitByBullet(HitByBulletEvent e) {
+	public void onHitByBullet(HitByBulletEvent e) 
+	{
 	}
 	
-	public void refresh(){
+	public void refresh()
+	{
 		turnRadarRight(360);
 	}
 	
-	public void reAcquire(){
-		turnRadarRight(360);
+	public void aimFire(zRobot r)
+	{
+		stop();
+		double neededDir = (getHeading() + r.zbearing)%360;
+		double neededTurn = neededDir - getGunHeading();
+		if(neededTurn > 180)
+			neededTurn -= 360;
+		turnGunRight(neededDir - getGunHeading()); 
+		fire(1);
+		resume();		
+		
+		
 	}
 	
+	
+	
+/*	public void aimFire(location loc)
+	{
+		stop();
+		double neededDir = Math.tan((loc.getY() - getY()) / (loc.getX() - getX()));
+		turnGunRight(neededDir - getGunHeading()); 
+		fire(1);
+		resume();
+	}
+		*/
 	
 }
 
 
 
 //Manages a list of robots
+
 class zRobotList{
 	public static ArrayList<zRobot> list;
 	
@@ -77,16 +90,38 @@ class zRobotList{
 	
 	
 	//update positions of Robots based on scan event
-	public static void zOnScan(ScannedRobotEvent e)
+	public static void logRobot(ScannedRobotEvent e, double x, double y, double h)
 	{
-		zRobot a = new zRobot(e);
-		zRobot.zheading = 0;
+		//is this needed?
+		if(list.size() < 1)
+			list.add(new zRobot(e,x,y,h));
+			
+		else
+		{
+			boolean newbot = true;
+			for(int i=0; i<list.size(); i++)
+			{
+				//if this robot is already in the list then update him
+				if(list.get(i).zname.equals(e.getName()))
+				{
+					newbot = false;
+					list.set(i, new zRobot(e,x,y,h));
+				}
+			}
+			
+			if(newbot)
+				list.add(new zRobot(e,x,y,h));
+		}
 	}
-	
+
 	
 	//return the closest target
 	public static zRobot getTarget()
 	{
+		if(isEmpty())
+			return null;
+		
+		//check for the smallest distance
 		zRobot min = list.get(0);
 		for(zRobot r : list)
 		{
@@ -94,47 +129,81 @@ class zRobotList{
 				min = r;
 		}
 		return min;
+		
+	}
+	
+	public static boolean isEmpty()
+	{
+		return list.size()<1;
 	}
 }
 
 
 
-//contains information on each robot
-class zRobot{
+//contains information on each robot, z will denote logged robot variables
+//variables are public static so they can be accessed without a 'get()'
+class zRobot
+{
 	public static double zheading;
 	public static double zbearing;
 	public static double zenergy;
 	public static double zdistance;
 	public static double zvelocity;
+	public static location zloc;
 	public static String zname;
 		
-	public zRobot(ScannedRobotEvent e){
+	public zRobot(ScannedRobotEvent e , double x, double y, double h)
+	{
 		zheading = e.getHeading();
+		//should I store bearing?
 		zbearing = e.getBearing();
 		zenergy = e.getEnergy();
 		zdistance = e.getDistance();
 		zvelocity = e.getVelocity();
 		zname = e.getName();
+		zloc = new location(zbearing, zdistance, x, y, h);
+				
 	}
+	
 }
 
+class location
+{
+	public static double x;
+	public static double y;
+	
+	location(double a, double b)
+	{
+		x = a;
+		y = b;
+	}
+	
+	//calculate from heading, bearing, distance, and current location
+	location(double zbearing, double zdistance, double a, double b, double heading)
+	{
+		
+		//calculate their heading
+		double zdirection = heading+zbearing;
+		
+		//add the x and y components of their distance to your x and y
+		x = a + zdistance * Math.sin(Math.toRadians(zdirection));
+		y = b + zdistance * Math.cos(Math.toRadians(zdirection));
+	}
+	
+	public static double getX()
+	{
+		return x;
+	}
+	public static double getY()
+	{
+		return y;
+	}
+	
+}
+	
 
 
 
-/*	public static void directBullet(Bullet b){
-		double heading = 90;
-		double x = 200;
-		double y = 200;
-		double power = 3;
-		String ownerName = b.getName();
-		String victimName = b.getVictim();
-		boolean isActive = true;
-        int bulletId = b.bulletId;
-		
-		
-		
-		return new Bullet(heading, x, y, power, ownerName, victimName, isActive, bulletId);
-	}*/
 
 
 /*				//Reading files		
@@ -179,3 +248,25 @@ class zRobot{
 
 
 
+/*	public static void directBullet(Bullet b){
+		double heading = 90;
+		double x = 200;
+		double y = 200;
+		double power = 3;
+		String ownerName = b.getName();
+		String victimName = b.getVictim();
+		boolean isActive = true;
+        int bulletId = b.bulletId;
+		
+		
+		
+		return new Bullet(heading, x, y, power, ownerName, victimName, isActive, bulletId);
+	}*/
+
+
+			
+		/*	getBattleFieldWidth();
+			getBattleFieldHeight();
+			getX();
+			getY();
+			*/
