@@ -11,6 +11,9 @@ public class Zeemus extends AdvancedRobot
 {
 	
 	zRobotList robotList = new zRobotList();
+	
+	//define the radius for wall avoidance
+	public double radius = 100;
 		
 	public void run() 
 	{
@@ -21,59 +24,127 @@ public class Zeemus extends AdvancedRobot
 			setAdjustRadarForGunTurn(true);
 			setAdjustGunForRobotTurn(true);
 			
-			//spin in a circle and scan
-			setBack(40000);
-			setTurnRight(90);
-			refresh();
-			if(getGunHeat()<.1)
-				aimFire(robotList.getTarget());
-			
+			Random rand = new Random();
+			//move foreward and turn in random directions
+			setAhead(40000);
+			if(rand.nextBoolean())
+			   setTurnRight(rand.nextInt(90));
+			else setTurnLeft(rand.nextInt(90));
+			wallAvoidance();		
+			refresh();			
 		}
 		
 	}
-	
-
-	//When scanning a robot, just tell the zRobotList to deal with it
-	public void onScannedRobot(ScannedRobotEvent e) 
-	{
-		
-		robotList.logRobot(e, getX(), getY(), getHeading());
-	}
-	
-	public void onHitByBullet(HitByBulletEvent e) 
-	{
-	}
-	
-	public void refresh()
-	{
-		turnRadarRight(360);
-	}
-	
+	//get the bearing of the robot, turn, and fire
 	public void aimFire(zRobot r)
 	{
 		stop();
-		double neededDir = (getHeading() + r.zbearing)%360;
-		double neededTurn = neededDir - getGunHeading();
-		if(neededTurn > 180)
-			neededTurn -= 360;
-		turnGunRight(neededDir - getGunHeading()); 
+		double neededDir = (getHeading() + r.zbearing);
+		turnGunCorrectly(neededDir); 
 		fire(1);
-		resume();		
-		
-		
-	}
+		resume();				                                        
+	}  
+	
+
 	
 	
 	
-/*	public void aimFire(location loc)
+	
+	//optimize turning for right and left, but don't turn if < n degrees difference
+	public void turnGunCorrectly(double dir)
+  {
+    double n = 0;
+    
+    //make sure the number is not greather than 360
+    dir %= 360;
+    
+    //dir is now how far to turn right
+    dir -= getGunHeading(); 
+    
+    //optimize turning right and left
+    boolean right = true;
+    if(dir < 0)
+    {
+    	dir *=-1;
+    	right = !right;
+    }
+    else if(dir > 180){
+    	dir -= 180;
+    	right = !right;
+    	
+    }
+    if(right)
+      turnGunRight(dir);
+     else turnGunLeft(dir);
+    return;
+      
+  }
+  
+  //does not work for backwards motion
+  //does not work for corners
+  //would like to scale the avoidance by the incident angle
+     public void wallAvoidance()
+  {
+    //if within one radii of the wall, begin turning around
+    if(getX() < radius)
+    {
+      if(getHeading() >= 270)
+      {
+        turnRight(180);
+      }
+      else 
+      {
+      turnLeft(180);
+      }
+    }               
+    if(getY() < radius)
+    {
+      if(getHeading() >= 180)
+      {
+        turnRight(180);
+      }
+      else 
+      {
+      turnLeft(180);
+      }
+    }
+    if(getX() > getBattleFieldWidth()-radius)
+    {
+      if(getHeading() >= 90)
+      {
+        turnRight(180);
+      }
+      else 
+      {
+      turnLeft(180);
+      }
+    }
+    if(getY() > getBattleFieldHeight()-radius)
+    {
+      if(getHeading() > 0 && getHeading() < 180)
+      {
+        turnRight(180);
+      }
+      else 
+      {
+      turnLeft(180);
+      }
+    }
+    ahead(100);
+  }	
+	//When scanning a robot, just tell the zRobotList to deal with it
+	public void onScannedRobot(ScannedRobotEvent e) 
 	{
-		stop();
-		double neededDir = Math.tan((loc.getY() - getY()) / (loc.getX() - getX()));
-		turnGunRight(neededDir - getGunHeading()); 
-		fire(1);
-		resume();
+		robotList.logRobot(e, getX(), getY(), getHeading());
+		aimFire(robotList.getTarget());
 	}
-		*/
+	
+	//spin the radar
+	public void refresh()
+	{
+		turnRadarRight(360);
+	}            
+
 	
 }
 
@@ -81,10 +152,12 @@ public class Zeemus extends AdvancedRobot
 
 //Manages a list of robots
 
-class zRobotList{
+class zRobotList
+{
 	public static ArrayList<zRobot> list;
 	
-	public zRobotList(){
+	public zRobotList()
+  {
 		list = new ArrayList<zRobot>();
 	}
 	
@@ -152,16 +225,16 @@ class zRobot
 	public static location zloc;
 	public static String zname;
 		
-	public zRobot(ScannedRobotEvent e , double x, double y, double h)
+	public zRobot(ScannedRobotEvent e , double x, double y, double heading)
 	{
 		zheading = e.getHeading();
-		//should I store bearing?
+		//don't store bearing once fire on location is fixed
 		zbearing = e.getBearing();
 		zenergy = e.getEnergy();
 		zdistance = e.getDistance();
 		zvelocity = e.getVelocity();
 		zname = e.getName();
-		zloc = new location(zbearing, zdistance, x, y, h);
+		zloc = new location(zbearing, zdistance, x, y, heading);
 				
 	}
 	
@@ -172,22 +245,22 @@ class location
 	public static double x;
 	public static double y;
 	
-	location(double a, double b)
+	location(double newX, double newY)
 	{
-		x = a;
-		y = b;
+		x = newX;
+		y = newY;
 	}
 	
 	//calculate from heading, bearing, distance, and current location
-	location(double zbearing, double zdistance, double a, double b, double heading)
+	location(double zbearing, double zdistance, double newX, double newY, double heading)
 	{
 		
 		//calculate their heading
 		double zdirection = heading+zbearing;
 		
 		//add the x and y components of their distance to your x and y
-		x = a + zdistance * Math.sin(Math.toRadians(zdirection));
-		y = b + zdistance * Math.cos(Math.toRadians(zdirection));
+		x = newX + zdistance * Math.sin(Math.toRadians(zdirection));
+		y = newY + zdistance * Math.cos(Math.toRadians(zdirection));
 	}
 	
 	public static double getX()
@@ -201,12 +274,27 @@ class location
 	
 }
 	
+                     /********* Code snippets
+
+    	              //aim fire for locations, broken, always fires at 0
+	public void aimFire(zRobot r)
+	{
+		stop();
+		location loc = r.zloc;
+		double neededDir = Math.tan((loc.getY() - getY()) / (loc.getX() - getX()));
+		turnGunCorrectly(neededDir);
+		fire(1);
+		resume();
+	}
+
+
+
+                                            
 
 
 
 
-
-/*				//Reading files		
+				//Reading files		             /////////////////////////
 		int roundCount;
 		try {
 			Scanner scan = new Scanner(new FileReader(getDataFile("count.dat")));
@@ -244,11 +332,11 @@ class location
 
 		out.println("I have been a sitting duck for " + roundCount + " rounds"); 
 		
-*/	
+	                                          /////////////////////////
 
 
 
-/*	public static void directBullet(Bullet b){
+	public static void directBullet(Bullet b){
 		double heading = 90;
 		double x = 200;
 		double y = 200;
@@ -261,12 +349,33 @@ class location
 		
 		
 		return new Bullet(heading, x, y, power, ownerName, victimName, isActive, bulletId);
-	}*/
-
-
+	}
+	
+	
+	
+	
+	
 			
-		/*	getBattleFieldWidth();
-			getBattleFieldHeight();
-			getX();
-			getY();
-			*/
+  public void wallAvoidance()
+  {
+    //if within one radii of the wall, begin turning around
+    if(getX() < radius || getY() < radius || getX() > getBattleFieldWidth()-radius || getY() > getBattleFieldHeight()-radius)
+    {
+    stop();
+      if(getHeading() <= 270)
+      {
+        turnRight(180);
+      }
+      else 
+      {
+      turnRight(180);
+      }
+      ahead(100);
+      resume();
+    }               
+    
+  }
+			
+			
+			
+			******/
