@@ -13,7 +13,12 @@ public class Zeemus extends AdvancedRobot
 	zRobotList robotList = new zRobotList();
 	
 	//define the radius for wall avoidance
-	public double radius = 100;
+	public double radius = 250;
+	//define the max random wait between shot time
+	public int waitVariable = 30;
+	public int waitLeft;
+	public boolean waiting;
+	public boolean tookShot;
 		
 	public void run() 
 	{
@@ -23,26 +28,41 @@ public class Zeemus extends AdvancedRobot
 			
 			setAdjustRadarForGunTurn(true);
 			setAdjustGunForRobotTurn(true);
-			
 			Random rand = new Random();
-			//move foreward and turn in random directions
+			
+			
+			//move foreward, turn in random directions, and spin the radar constantly
+			setTurnRadarRight(3600);
 			setAhead(40000);
 			if(rand.nextBoolean())
 			   setTurnRight(rand.nextInt(90));
 			else setTurnLeft(rand.nextInt(90));
-			wallAvoidance();		
-			refresh();			
+			
+			
+			wallAvoidance();
+			
+			//shoot every once in a while
+			if(tookShot)
+				waitLeft = rand.nextInt(waitVariable);
+			if(waitLeft <=0)
+				waiting = false;
+			waitLeft--;		
 		}
 		
 	}
-	//get the bearing of the robot, turn, and fire
+	//get the bearing of the robot, turn, and fire if you plan on shooting
 	public void aimFire(zRobot r)
 	{
-		stop();
-		double neededDir = (getHeading() + r.zbearing);
-		turnGunCorrectly(neededDir); 
-		fire(1);
-		resume();				                                        
+		if(!waiting)
+		{
+			tookShot = true;
+			waiting = true;
+			stop();
+			double neededDir = (getHeading() + r.zbearing);
+			turnGunCorrectly(neededDir); 
+			fire(2);
+			resume();	
+		}			                                        
 	}  
 	
 
@@ -85,51 +105,61 @@ public class Zeemus extends AdvancedRobot
   //would like to scale the avoidance by the incident angle
      public void wallAvoidance()
   {
+  	//store variables temporarily to decrease method calls
+  	double tempHeading = getHeading();
+  	double tempX = getX();
+  	double tempY = getY();
+  	
+    //if approaching a corner, turn around
+    
+    //top left
+    if(tempX < 2*radius && tempY < 2*radius)
+    	turnGunCorrectly(45);
+    //bottom right
+    if(tempX < 2*radius && tempY > getBattleFieldWidth() - radius)
+    	turnGunCorrectly(135);
+    //top left
+    if(tempX > getBattleFieldHeight() - radius && tempY < 2*radius)
+    	turnGunCorrectly(225);
+    //top right
+    if(tempX > getBattleFieldHeight() - radius && tempY > getBattleFieldWidth() - radius)
+    	turnGunCorrectly(315);
+
     //if within one radii of the wall, begin turning around
-    if(getX() < radius)
+    //turn around at least 90 degrees, and a full 180 if you are 
+    //approaching straight on
+    
+    //else is present not because they are exclusive, but only because
+    //it would not be good to enact both turning behaviors   	
+    else if(tempX < radius)
     {
-      if(getHeading() >= 270)
-      {
-        turnRight(180);
-      }
+      if(tempHeading >= 270)
+        turnRight(Math.abs(Math.cos(tempHeading))*90+90);
       else 
-      {
-      turnLeft(180);
-      }
-    }               
-    if(getY() < radius)
+      	turnLeft(Math.abs(Math.cos(tempHeading))*90+90);
+    }           
+    else if(tempY < radius)
     {
-      if(getHeading() >= 180)
-      {
-        turnRight(180);
-      }
+      if(tempHeading >= 180)
+        turnRight(Math.abs(Math.sin(tempHeading))*90+90);
       else 
-      {
-      turnLeft(180);
-      }
+      	turnLeft(Math.abs(Math.sin(tempHeading))*90+90);
     }
-    if(getX() > getBattleFieldWidth()-radius)
+    else if(tempX > getBattleFieldWidth()-radius)
     {
-      if(getHeading() >= 90)
-      {
-        turnRight(180);
-      }
+      if(tempHeading >= 90)
+        turnRight(Math.abs(Math.cos(tempHeading))*90+90);
       else 
-      {
-      turnLeft(180);
-      }
-    }
-    if(getY() > getBattleFieldHeight()-radius)
+      	turnLeft(Math.abs(Math.cos(tempHeading))*90+90);
+    }	
+    else if(tempY > getBattleFieldHeight()-radius)
     {
-      if(getHeading() > 0 && getHeading() < 180)
-      {
-        turnRight(180);
-      }
+      if(tempHeading > 0 && tempHeading < 180)
+        turnRight(Math.abs(Math.sin(tempHeading))*90+90);
       else 
-      {
-      turnLeft(180);
-      }
+      	turnLeft(Math.abs(Math.sin(tempHeading))*90+90);
     }
+
     ahead(100);
   }	
 	//When scanning a robot, just tell the zRobotList to deal with it
@@ -138,13 +168,7 @@ public class Zeemus extends AdvancedRobot
 		robotList.logRobot(e, getX(), getY(), getHeading());
 		aimFire(robotList.getTarget());
 	}
-	
-	//spin the radar
-	public void refresh()
-	{
-		turnRadarRight(360);
-	}            
-
+     
 	
 }
 
@@ -240,6 +264,7 @@ class zRobot
 	
 }
 
+//has a constructor which determines position from an onScannedEvent
 class location
 {
 	public static double x;
