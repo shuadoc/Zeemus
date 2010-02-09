@@ -2,6 +2,7 @@
 
 package JD;
 import robocode.*;
+import robocode.RobocodeFileOutputStream;
 import java.awt.*;
 import java.io.*;
 import java.util.*;
@@ -63,46 +64,50 @@ public class Zeemus extends AdvancedRobot
 			fire(2);
 			resume();	
 		}			                                        
-	}  
-	
-
+	} 
 	
 	
-	
+	//take robot's heading, velocity, and distace to robot
+	//estimate where they will be when the bullet arrives
+	public void estimateFuturePosition(zRobot r)
+	{
+		
+		
+		
+		
+		
+	}
 	
 	//optimize turning for right and left, but don't turn if < n degrees difference
 	public void turnGunCorrectly(double dir)
-  {
-    double n = 0;
-    
-    //make sure the number is not greather than 360
-    dir %= 360;
-    
-    //dir is now how far to turn right
-    dir -= getGunHeading(); 
-    
-    //optimize turning right and left
-    boolean right = true;
-    if(dir < 0)
-    {
-    	dir *=-1;
-    	right = !right;
-    }
-    else if(dir > 180){
-    	dir -= 180;
-    	right = !right;
-    	
-    }
-    if(right)
-      turnGunRight(dir);
-     else turnGunLeft(dir);
-    return;
-      
-  }
+  	{
+	    double n = 0;
+	    
+	    //make sure the number is not greather than 360
+	    dir %= 360;
+	    
+	    //dir is now how far to turn right
+	    dir -= getGunHeading(); 
+	    
+	    //optimize turning right and left
+	    boolean right = true;
+	    if(dir < 0)
+	    {
+	    	dir *=-1;
+	    	right = !right;
+	    }
+	    else if(dir > 180){
+	    	dir -= 180;
+	    	right = !right;
+	    	
+	    }
+	    if(right)
+	      turnGunRight(dir);
+	     else turnGunLeft(dir);
+	    return;
+	}
   
   //does not work for backwards motion
-  //does not work for corners
-  //would like to scale the avoidance by the incident angle
      public void wallAvoidance()
   {
   	//store variables temporarily to decrease method calls
@@ -129,7 +134,7 @@ public class Zeemus extends AdvancedRobot
     //turn around at least 90 degrees, and a full 180 if you are 
     //approaching straight on
     
-    //else is present not because they are exclusive, but only because
+    //else is present not because the criteria are exclusive, but only because
     //it would not be good to enact both turning behaviors   	
     else if(tempX < radius)
     {
@@ -178,36 +183,33 @@ public class Zeemus extends AdvancedRobot
 
 class zRobotList
 {
-	public static ArrayList<zRobot> list;
+	public static ArrayList<Stack<zRobot>> list;
 	
 	public zRobotList()
-  {
-		list = new ArrayList<zRobot>();
+	{
+		list = new ArrayList<Stack<zRobot>>();
 	}
 	
 	
 	//update positions of Robots based on scan event
 	public static void logRobot(ScannedRobotEvent e, double x, double y, double h)
 	{
-		//is this needed?
-		if(list.size() < 1)
-			list.add(new zRobot(e,x,y,h));
-			
-		else
+		boolean newbot = true;
+		for(int i=0; i<list.size(); i++)
 		{
-			boolean newbot = true;
-			for(int i=0; i<list.size(); i++)
+			//if this robot is already in the list then update him
+			if(list.get(i).peek().zname.equals(e.getName()))
 			{
-				//if this robot is already in the list then update him
-				if(list.get(i).zname.equals(e.getName()))
-				{
-					newbot = false;
-					list.set(i, new zRobot(e,x,y,h));
-				}
+				newbot = false;
+				list.get(i).push(new zRobot(e,x,y,h));
+				
 			}
-			
-			if(newbot)
-				list.add(new zRobot(e,x,y,h));
+		}
+		
+		if(newbot){
+			Stack<zRobot> temp = new Stack<zRobot>();
+			temp.push(new zRobot(e,x,y,h));
+			list.add(temp);
 		}
 	}
 
@@ -219,11 +221,11 @@ class zRobotList
 			return null;
 		
 		//check for the smallest distance
-		zRobot min = list.get(0);
-		for(zRobot r : list)
+		zRobot min = list.get(0).peek();
+		for(Stack<zRobot> s : list)
 		{
-			if(r.zdistance < min.zdistance)
-				min = r;
+			if(s.peek().zdistance < min.zdistance)
+				min = s.peek();
 		}
 		return min;
 		
@@ -298,6 +300,44 @@ class location
 	}
 	
 }
+
+
+class debug
+{
+	public static PrintStream ps;
+	
+	debug()
+	{
+		ps = null;
+	}
+	
+	public static void print(String input)
+	{
+		try {
+			new PrintStream(new RobocodeFileOutputStream(getDataFile("debug.dat")));
+			
+			ps.println("");
+			
+			if (ps.checkError()) {
+				System.out.println("I could not write the count!");
+			}
+		} catch (IOException e) {
+			System.out.println("IOException trying to write: ");
+			e.printStackTrace(System.out);
+		}
+		finally {
+			if (ps != null) {
+				ps.close();
+			}
+		}
+	}
+}
+
+
+
+
+
+
 	
                      /********* Code snippets
 
@@ -311,12 +351,6 @@ class location
 		fire(1);
 		resume();
 	}
-
-
-
-                                            
-
-
 
 
 				//Reading files		             /////////////////////////
@@ -336,24 +370,7 @@ class location
 		// Increment the # of rounds
 		roundCount++;
 
-		PrintStream w = null;
-		try {
-			w = new PrintStream(new RobocodeFileOutputStream(getDataFile("count.dat")));
 
-			w.println(roundCount);
-			// PrintStreams don't throw IOExceptions during prints,
-			// they simply set a flag.... so check it here.
-			if (w.checkError()) {
-				out.println("I could not write the count!");
-			}
-		} catch (IOException e) {
-			out.println("IOException trying to write: ");
-			e.printStackTrace(out);
-		} finally {
-			if (w != null) {
-				w.close();
-			}
-		}
 
 		out.println("I have been a sitting duck for " + roundCount + " rounds"); 
 		
