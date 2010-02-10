@@ -21,6 +21,9 @@ public class Zeemus extends AdvancedRobot
 	//define the radius for wall avoidance
 	public double radius = 20;
 	
+	public int shotsFired;
+	public int shotsHit;
+	
 		
 	public void run() 
 	{
@@ -33,8 +36,9 @@ public class Zeemus extends AdvancedRobot
 			setAdjustRadarForGunTurn(true);
 			setAdjustGunForRobotTurn(true);
 			
-			setMovement();
-			setRadar();		
+			ahead(100);
+			
+			setRadar();
 			wallAvoidance();
 	
 		}
@@ -54,14 +58,23 @@ public class Zeemus extends AdvancedRobot
 				hotspots[r][hotspots[r].length-1] = 100;
 			}
 		}
+		shotsFired = 0;
+		shotsHit = 0;
 		
 		initialized = true;
 	}
 	
 	public void setMovement()
 	{
+		navigate();
 		ahead(100);
 	//	moveRandomly();	
+	}
+	
+	public void navigate()
+	{
+		
+		
 	}
 	
 	public void setRadar()
@@ -95,11 +108,19 @@ public class Zeemus extends AdvancedRobot
 	
 	public void aimFire(Location loc)
 	{
-		stop();
-		Location here = new Location(getX(), getY());
-		turnGunCorrectly(here.degreeTo(loc));
-		fire(1);
-		resume();
+		if(1.0 * shotsHit / shotsFired > .2 || shotsFired < 15){
+			stop();
+			Location here = new Location(getX(), getY());
+			double x,y;
+			//make sure the target you are firing at is in bounds
+			Location temp = new Location(Math.min(getBattleFieldWidth(),Math.max(0,loc.getX())),Math.min(getBattleFieldHeight(),Math.max(0,loc.getY())));
+			turnGunCorrectly(here.degreeTo(temp));
+			
+			fire(1);
+			shotsFired++;
+			
+			resume();
+		}
 	}
 	
 
@@ -138,6 +159,11 @@ public class Zeemus extends AdvancedRobot
 	{
 		targets.logRobot(e, getX(), getY(), getHeading());
 		aimFire(targets.estimatePos(1, new Location(getX(),getY())));
+	}
+	
+	public void onBulletHit(BulletHitEvent e)
+	{
+		shotsHit++;
 	}
      
 	
@@ -180,7 +206,8 @@ class TargetList
 	public  Location estimatePos(int power , Location zee)
 	{
 		Bot target = getTarget();
-		return estimatePostitionHelper(zee, power, target.getVelocity(), target.getHeading(), 0, target.getLocation(), 3);	
+		return estimatePostitionHelper(zee, power, target.getVelocity(), target.getHeading(), 0, target.getLocation(), 5);	
+
 	}
 	
 	public Location estimatePostitionHelper(Location zee, double power, double velocity, double heading, double priorDistance, Location loc, int recurseNum)
