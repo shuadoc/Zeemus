@@ -29,6 +29,7 @@ public class Zeemus extends AdvancedRobot
 		System.out.println(hotspots.length +":"+hotspots[0].length);
 		while(true)
 		{
+			
 			setAdjustRadarForGunTurn(true);
 			setAdjustGunForRobotTurn(true);
 			
@@ -136,7 +137,7 @@ public class Zeemus extends AdvancedRobot
 	public void onScannedRobot(ScannedRobotEvent e) 
 	{
 		targets.logRobot(e, getX(), getY(), getHeading());
-		aimFire(targets.getTarget().getLocation());
+		aimFire(targets.estimatePos(1, new Location(getX(),getY())));
 	}
      
 	
@@ -144,18 +145,18 @@ public class Zeemus extends AdvancedRobot
 
 class TargetList
 {
-	public static ArrayList<BotLog> log;
+	public  ArrayList<BotLog> log;
 		
 	public TargetList(){
 		log = new ArrayList<BotLog>();
 	}	
 	
-	public static boolean isEmpty()
+	public  boolean isEmpty()
 	{
 		return log.size()<1;
 	}
 	
-	public static void logRobot(ScannedRobotEvent e, double x, double y, double h)
+	public  void logRobot(ScannedRobotEvent e, double x, double y, double heading)
 	{
 		boolean newbot = true;
 		for(int i=0; i<log.size(); i++)
@@ -164,30 +165,48 @@ class TargetList
 			if(log.get(i).getName().equals(e.getName()))
 			{
 				newbot = false;
-				log.get(i).logRobot(e,x,y,h);
+				log.get(i).logRobot(e,x,y,heading);
 			}
 		}
 		
 		if(newbot){
-			log.add(new BotLog(e,x,y,h));
+			log.add(new BotLog(e,x,y,heading));
 		}
 	}
 	
 	
 	//take robot's heading, velocity, and distace to robot
 	//estimate where they will be when the bullet arrives
-	public static Location getFiringPosition()
+	public  Location estimatePos(int power , Location zee)
 	{
-		return new Location(0,0);
+		Bot target = getTarget();
+		return estimatePostitionHelper(zee, power, target.getVelocity(), target.getHeading(), 0, target.getLocation(), 3);	
+	}
+	
+	public Location estimatePostitionHelper(Location zee, double power, double velocity, double heading, double priorDistance, Location loc, int recurseNum)
+	{
+		if(recurseNum <= 0)
+			return loc;
+		double distance = Math.sqrt(Math.pow(loc.getX()-zee.getX() , 2) + Math.pow(loc.getY()-zee.getY() , 2));
+		distance -= priorDistance;
+		double time = distance / (20 - power*3);
+		
+		double x = loc.getX() + velocity * time * (Math.sin(Math.toRadians(heading)));
+		double y = loc.getY() + velocity * time * (Math.cos(Math.toRadians(heading)));
+		
+		Location update = new Location(x,y);
+		
+		return estimatePostitionHelper(zee, power, velocity, heading, distance+priorDistance, update, recurseNum-1);
+		
 	}
 		
 		
 			//return the closest target
-	public static Bot getTarget()
+	public  Bot getTarget()
 	{
 		if(isEmpty())
 			return null;
-		else return log.get(0).getLast();
+		return log.get(0).getLast();
 	}
 }
 
@@ -196,8 +215,8 @@ class TargetList
 //Manages a list of events for each robot
 class BotLog
 {
-	public static ArrayList<Bot> list;
-	private static String name;
+	public  ArrayList<Bot> list;
+	private  String name;
 	
 	public BotLog()
 	{
@@ -205,27 +224,27 @@ class BotLog
 		name = null;
 	}
 	
-	public BotLog(ScannedRobotEvent e, double x, double y, double h)
+	public BotLog(ScannedRobotEvent e, double x, double y, double heading)
 	{
 		list = new ArrayList<Bot>();
 		name = e.getName();
-		logRobot(e,x,y,h);
+		logRobot(e,x,y,heading);
 	}
 	
-	public static void logRobot(ScannedRobotEvent e, double x, double y, double h)
+	public void logRobot(ScannedRobotEvent e, double x, double y, double heading)
 	{
-		list.add(new Bot(e,x,y,h));		
+		list.add(new Bot(e,x,y,heading));		
 	}
 	
-	public static Bot getLast(){
-		return list.get(0);
+	public Bot getLast(){
+		return list.get(list.size()-1);
 	}
 	
-	public static String getName(){
+	public String getName(){
 		return name;
 	}
 	
-	public static boolean isEmpty()
+	public boolean isEmpty()
 	{
 		return list.size()<1;
 	}
@@ -235,15 +254,15 @@ class BotLog
 //container for storing information on scanned robots
 class Bot
 {
-	private static double heading;
-	private static double bearing;
-	private static double energy;
-	private static double distance;
-	private static double velocity;
-	private static long time;
-	private static Location loc;
+	private double heading;
+	private double bearing;
+	private double energy;
+	private double distance;
+	private double velocity;
+	private long time;
+	private Location loc;
 		
-	public Bot(ScannedRobotEvent e , double x, double y, double heading)
+	public Bot(ScannedRobotEvent e , double x, double y, double h)
 	{
 		heading = e.getHeading();
 		//don't store bearing once fire on location is fixed
@@ -251,26 +270,26 @@ class Bot
 		energy = e.getEnergy();
 		distance = e.getDistance();
 		velocity = e.getVelocity();
-		loc = new Location(bearing, distance, x, y, heading);
+		loc = new Location(bearing, distance, x, y, h);
 				
 	}
 	
-	public static double getHeading(){
+	public  double getHeading(){
 		return heading;
 	}
-	public static double getBearing(){
+	public  double getBearing(){
 		return bearing;
 	}
-	public static double getEnergy(){
+	public  double getEnergy(){
 		return energy;
 	}
-	public static double getDistance(){
+	public  double getDistance(){
 		return distance;
 	}
-	public static double getVelocity(){
+	public  double getVelocity(){
 		return velocity;
 	}
-	public static Location getLocation(){
+	public  Location getLocation(){
 		return loc;
 	}
 	
@@ -279,40 +298,48 @@ class Bot
 //has a constructor which determines position from an onScannedEvent
 class Location
 {
-	public static double x;
-	public static double y;
+	private  double x;
+	private  double y;
 	
-	Location(double newX, double newY)
+	Location(double sentX, double sentY)
 	{
-		x = newX;
-		y = newY;
+		x = sentX;
+		y = sentY;
 	}
 	
 	//calculate from heading, bearing, distance, and current location
-	Location(double bearing, double distance, double newX, double newY, double heading)
+	Location(double bearing, double distance, double sentX, double sentY, double heading)
 	{
 		
 		//calculate their heading
 		double direction = heading+bearing;
+		//remove negatives and greater than 360's
+		direction = (direction + 360)%360;
+		
+		
 		
 		//add the x and y components of their distance to your x and y
-		x = newX + distance * Math.sin(Math.toRadians(direction));
-		y = newY + distance * Math.cos(Math.toRadians(direction));
+		x = sentX + distance * Math.sin(Math.toRadians(direction));
+		y = sentY + distance * Math.cos(Math.toRadians(direction));
+		
 	}
 	
 	//returns what degree points to the location specified from this location
-	public static double degreeTo(Location loc)
+	public  double degreeTo(Location loc)
 	{
+		// make sure that there is no divide by zero error
+		if(y==loc.getY())
+			y+=.0000001;
 		double angle = 180 + Math.toDegrees(Math.atan((x - loc.getX()) / (y - loc.getY())));
 		if(y < loc.getY())
 			angle = (angle + 180)%360;
 		return angle;
 	}
 	
-	public static double getX(){
+	public  double getX(){
 		return x;
 	}
-	public static double getY(){
+	public  double getY(){
 		return y;
 	}
 	
@@ -320,17 +347,6 @@ class Location
 
 	
                      /********* Code snippets
-
-    	              //aim fire for locations, broken, always fires at 0
-	public void aimFire()
-	{
-		stop();
-		location loc = new Location(0,0);
-		double neededDir = Math.tan((loc.getY() - getY()) / (loc.getX() - getX()));
-		turnGunCorrectly(neededDir);
-		fire(1);
-		resume();
-	}
 
 
 				//Reading files		             /////////////////////////
@@ -358,7 +374,7 @@ class Location
 
 
 
-	public static void directBullet(Bullet b){
+	public  void directBullet(Bullet b){
 		double heading = 90;
 		double x = 200;
 		double y = 200;
@@ -440,16 +456,6 @@ class Location
     ahead(100);
   }	
   	
-			///////////////////////////////////////
-				//get the bearing of the robot, turn, and fire
-	public void aimFire(Bot r)
-	{
-		stop();
-		double neededDir = (getHeading() + r.getBearing());
-		turnGunCorrectly(neededDir); 
-		fire(2);
-		resume();	                                
-	} 
 	////////////////////////////////////////
 			
 			
