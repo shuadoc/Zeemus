@@ -15,12 +15,16 @@ public class Zeemus extends AdvancedRobot
 	ArrayList<String> movements = new ArrayList<String>();
 	
 	
+	//temporary variable to set how far away from enemies is dangerous, should be set by a learning method of some kind
+	int AVOIDANCE_RADIUS = 100;
+	
+	
 	//for setting up a map of dangerous locations
 	int[][][] hotspots;
 	//the amount of pixels per index in the hotspot map
-	int GRANULARITY = 20;
+	int GRANULARITY = 10;
 	//the amount of timesteps in the future
-	int TIMESCALE = 30;
+	int TIMESCALE = 2;
 	//the timestep representing the present.  Time cycles through the last dimension of the matrix
 	//for example:  when timestep is at 29, the next tick is in hotspots[r][c][0]
 	int timestep;
@@ -36,7 +40,30 @@ public class Zeemus extends AdvancedRobot
 	//stop firing if hit percentage falls below this amount
 	public double CRITICAL_PERCENTAGE = .2;
 	
+	public void initialize()
+	{
+		//define each location in the hotspot map to contain multiple pixels
+		hotspots = new int[TIMESCALE][(int)getBattleFieldWidth()/GRANULARITY][(int)getBattleFieldHeight()/GRANULARITY];
 		
+		//set up so that the edges of the map are 'dangerous'
+		for(int t=0; t<TIMESCALE; t++){
+			for(int r=0; r< hotspots[t].length; r++){
+				hotspots[t][r][0] = 10;
+				hotspots[t][r][hotspots[t][0].length-1] = 10;
+			}
+			for(int c=0; c< hotspots[t][0].length; c++){
+				hotspots[t][0][c] = 10;
+				hotspots[t][hotspots[t].length-1][c] = 10;
+			}
+		}
+		shotsFired = 0;
+		shotsHit = 0;
+		timestep = 0;
+		
+		initialized = true;
+	}	
+	
+	
 	public void run() 
 	{
 		if(!initialized)
@@ -56,32 +83,12 @@ public class Zeemus extends AdvancedRobot
 			
 			turnRadarRight(360);
 			wallAvoidance();
+			
+			updateMap();
 	
 		}
 	}
-	
-	public void initialize()
-	{
-		//define each location in the hotspot map to contain multiple pixels
-		hotspots = new int[(int)getBattleFieldWidth()/GRANULARITY][(int)getBattleFieldHeight()/GRANULARITY][TIMESCALE];
-		
-		//set up so that the edges of the map are 'dangerous'
-		for(int r=0; r< hotspots.length; r++){
-			for(int c=0; c< hotspots[r].length; c++){
-				for(int t=0; t<TIMESCALE; t++){
-					hotspots[0][c][t] = 100;
-					hotspots[r][0][t] = 100;
-					hotspots[hotspots.length-1][c][t] = 100;
-					hotspots[r][hotspots[r].length-1][t] = 100;
-				}
-			}
-		}
-		shotsFired = 0;
-		shotsHit = 0;
-		timestep = 0;
-		
-		initialized = true;
-	}
+
 	
 	public void setMovement()
 	{
@@ -99,6 +106,37 @@ public class Zeemus extends AdvancedRobot
 	public void setRadar()
 	{
 		setTurnRadarRight(360);
+	}
+	
+	public void updateMap()
+	{
+		//for now, just reset the map to t=1 until it is looping through timestamps of future locations
+		//will need to create a template map for each timestamp
+		hotspots[0] = hotspots[1].clone();
+		
+		Location loc = targets.getTarget().getLocation();
+		
+		hotspots[0][(int)loc.getX()/GRANULARITY][(int)loc.getY()/GRANULARITY] += 1;
+
+
+
+/*
+		int xMinus = (int)(Math.max(0, loc.getX() - 100))/GRANULARITY;
+		int xPlus = (int)(Math.min(hotspots[0][0].length-1, loc.getX() + 100))/GRANULARITY;
+		int yMinus = (int)(Math.max(0, loc.getY() - 100))/GRANULARITY;
+		int yPlus = (int)(Math.min(hotspots[0].length-1, loc.getY() + 100))/GRANULARITY;
+		
+		for(int i=0; i<(int)AVOIDANCE_RADIUS/GRANULARITY; i++){
+			hotspots[0][xMinus+i][yMinus] +=1;
+			hotspots[0][xMinus][yMinus+i] +=1;
+			hotspots[0][xPlus][yPlus-i] +=1;
+			hotspots[0][xPlus-i][yPlus] +=1;
+			
+			
+		}*/
+		
+		
+		
 	}
 	
 	
@@ -188,16 +226,14 @@ public class Zeemus extends AdvancedRobot
 	
 	public void onPaint(Graphics2D g)
 	{
-		for(int r=0; r< hotspots.length; r++){
-			for(int c=0; c< hotspots[r].length; c++){
-//				for(int t=timestep; t<TIMESCALE; t++){
-					if(hotspots[r][c][0] > 0){
+		// just paint the first timestep for now
+		for(int t=0; t<TIMESCALE; t++){
+			for(int r=0; r< hotspots[t].length; r++){
+				for(int c=0; c< hotspots[t][r].length; c++){
+					if(hotspots[t][r][c] > 0){
 						Rectangle box = new Rectangle(r*GRANULARITY,c*GRANULARITY,GRANULARITY,GRANULARITY);
 						g.draw(box);
 					}
-//				}
-				for(int t=0; t<TIMESCALE; t++){
-					//same			
 				}
 			}
 		}
