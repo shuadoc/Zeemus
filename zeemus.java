@@ -12,33 +12,49 @@ public class Zeemus extends AdvancedRobot
 	
 	TargetList targets = new TargetList();
 	
-	//for setting up a map of dangerous locations
-	boolean initialized = false;
-	int[][] hotspots;
-	//the amount of pixels per index in the hotspot map
-	int GRANULARITY = 10;
+	ArrayList<String> movements = new ArrayList<String>();
 	
+	
+	//for setting up a map of dangerous locations
+	int[][][] hotspots;
+	//the amount of pixels per index in the hotspot map
+	int GRANULARITY = 20;
+	//the amount of timesteps in the future
+	int TIMESCALE = 30;
+	//the timestep representing the present.  Time cycles through the last dimension of the matrix
+	//for example:  when timestep is at 29, the next tick is in hotspots[r][c][0]
+	int timestep;
+	//for the initial setup of the grid based on length and width
+	boolean initialized = false;
+	
+		
 	//define the radius for wall avoidance
-	public double radius = 20;
+	public double radius = 30;
 	
 	public int shotsFired;
 	public int shotsHit;
+	//stop firing if hit percentage falls below this amount
+	public double CRITICAL_PERCENTAGE = .2;
 	
 		
 	public void run() 
 	{
 		if(!initialized)
 			initialize();
-		System.out.println(hotspots.length +":"+hotspots[0].length);
 		while(true)
 		{
 			
+			//Make the gun and radar turn independently
 			setAdjustRadarForGunTurn(true);
 			setAdjustGunForRobotTurn(true);
 			
-			ahead(100);
+			Random rand = new Random();
+			setAhead(40000);
+			if(rand.nextBoolean())
+			   setTurnRight(rand.nextInt(90));
+			else setTurnLeft(rand.nextInt(90));
 			
-			setRadar();
+			turnRadarRight(360);
 			wallAvoidance();
 	
 		}
@@ -47,19 +63,22 @@ public class Zeemus extends AdvancedRobot
 	public void initialize()
 	{
 		//define each location in the hotspot map to contain multiple pixels
-		hotspots = new int[(int)getBattleFieldHeight()/GRANULARITY][(int)getBattleFieldWidth()/GRANULARITY];
+		hotspots = new int[(int)getBattleFieldWidth()/GRANULARITY][(int)getBattleFieldHeight()/GRANULARITY][TIMESCALE];
 		
 		//set up so that the edges of the map are 'dangerous'
 		for(int r=0; r< hotspots.length; r++){
 			for(int c=0; c< hotspots[r].length; c++){
-				hotspots[0][c] = 100;
-				hotspots[r][0] = 100;
-				hotspots[hotspots.length-1][c] = 100;
-				hotspots[r][hotspots[r].length-1] = 100;
+				for(int t=0; t<TIMESCALE; t++){
+					hotspots[0][c][t] = 100;
+					hotspots[r][0][t] = 100;
+					hotspots[hotspots.length-1][c][t] = 100;
+					hotspots[r][hotspots[r].length-1][t] = 100;
+				}
 			}
 		}
 		shotsFired = 0;
 		shotsHit = 0;
+		timestep = 0;
 		
 		initialized = true;
 	}
@@ -108,14 +127,15 @@ public class Zeemus extends AdvancedRobot
 	
 	public void aimFire(Location loc)
 	{
-		if(1.0 * shotsHit / shotsFired > .2 || shotsFired < 15){
+		//only shoot if you are hitting the enemy
+		if(1.0 * shotsHit / shotsFired > CRITICAL_PERCENTAGE || shotsFired < 15){
 			stop();
+			
 			Location here = new Location(getX(), getY());
-			double x,y;
 			//make sure the target you are firing at is in bounds
 			Location temp = new Location(Math.min(getBattleFieldWidth(),Math.max(0,loc.getX())),Math.min(getBattleFieldHeight(),Math.max(0,loc.getY())));
-			turnGunCorrectly(here.degreeTo(temp));
 			
+			turnGunCorrectly(here.degreeTo(temp));
 			fire(1);
 			shotsFired++;
 			
@@ -165,6 +185,25 @@ public class Zeemus extends AdvancedRobot
 	{
 		shotsHit++;
 	}
+	
+	public void onPaint(Graphics2D g)
+	{
+		for(int r=0; r< hotspots.length; r++){
+			for(int c=0; c< hotspots[r].length; c++){
+//				for(int t=timestep; t<TIMESCALE; t++){
+					if(hotspots[r][c][0] > 0){
+						Rectangle box = new Rectangle(r*GRANULARITY,c*GRANULARITY,GRANULARITY,GRANULARITY);
+						g.draw(box);
+					}
+//				}
+				for(int t=0; t<TIMESCALE; t++){
+					//same			
+				}
+			}
+		}
+		
+		
+	}
      
 	
 }
@@ -210,6 +249,7 @@ class TargetList
 
 	}
 	
+	//Helper method uses recursion to approximate future location
 	public Location estimatePostitionHelper(Location zee, double power, double velocity, double heading, double priorDistance, Location loc, int recurseNum)
 	{
 		if(recurseNum <= 0)
@@ -228,7 +268,7 @@ class TargetList
 	}
 		
 		
-			//return the closest target
+	//return the closest target for now
 	public  Bot getTarget()
 	{
 		if(isEmpty())
@@ -282,7 +322,6 @@ class BotLog
 class Bot
 {
 	private double heading;
-	private double bearing;
 	private double energy;
 	private double distance;
 	private double velocity;
@@ -292,20 +331,15 @@ class Bot
 	public Bot(ScannedRobotEvent e , double x, double y, double h)
 	{
 		heading = e.getHeading();
-		//don't store bearing once fire on location is fixed
-		bearing = e.getBearing();
 		energy = e.getEnergy();
 		distance = e.getDistance();
 		velocity = e.getVelocity();
-		loc = new Location(bearing, distance, x, y, h);
+		loc = new Location(e.getBearing(), distance, x, y, h);
 				
 	}
 	
 	public  double getHeading(){
 		return heading;
-	}
-	public  double getBearing(){
-		return bearing;
 	}
 	public  double getEnergy(){
 		return energy;
@@ -343,13 +377,15 @@ class Location
 		//remove negatives and greater than 360's
 		direction = (direction + 360)%360;
 		
-		
-		
 		//add the x and y components of their distance to your x and y
 		x = sentX + distance * Math.sin(Math.toRadians(direction));
 		y = sentY + distance * Math.cos(Math.toRadians(direction));
 		
 	}
+
+//  would it be better to move this logic outside of the constructor?	
+//	public Location calculateLoc(double bearing, double distance, double sentX, double sentY double heading)
+
 	
 	//returns what degree points to the location specified from this location
 	public  double degreeTo(Location loc)
