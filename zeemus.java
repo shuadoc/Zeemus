@@ -9,164 +9,57 @@ import java.util.*;
 
 public class Zeemus extends AdvancedRobot
 {
-	
 	TargetList targets = new TargetList();
 	
-	ArrayList<String> movements = new ArrayList<String>();
+	Environment env = new Environment(targets);
 	
+	Planner plan = new Planner(env);
 	
-	//temporary variable to set how far away from enemies is dangerous, should be set by a learning method of some kind
-	int AVOIDANCE_RADIUS = 100;
-	
-	
-	//for setting up a map of dangerous locations
-	int[][][] hotspots;
-	//the amount of pixels per index in the hotspot map
-	int GRANULARITY = 10;
-	//the amount of timesteps in the future
-	int TIMESCALE = 2;
-	//the timestep representing the present.  Time cycles through the last dimension of the matrix
-	//for example:  when timestep is at 29, the next tick is in hotspots[r][c][0]
-	int timestep;
-	//for the initial setup of the grid based on length and width
+	//for the initial setup of the environment
 	boolean initialized = false;
 	
-		
-	//define the radius for wall avoidance
-	public double radius = 30;
-	
-	public int shotsFired;
-	public int shotsHit;
+	//log hit success rate
+	public int shotsFired = 0;
+	public int shotsHit = 0;
 	//stop firing if hit percentage falls below this amount
 	public double CRITICAL_PERCENTAGE = .2;
 	
-	public void initialize()
-	{
-		//define each location in the hotspot map to contain multiple pixels
-		hotspots = new int[TIMESCALE][(int)getBattleFieldWidth()/GRANULARITY][(int)getBattleFieldHeight()/GRANULARITY];
-		
-		//set up so that the edges of the map are 'dangerous'
-		for(int t=0; t<TIMESCALE; t++){
-			for(int r=0; r< hotspots[t].length; r++){
-				hotspots[t][r][0] = 10;
-				hotspots[t][r][hotspots[t][0].length-1] = 10;
-			}
-			for(int c=0; c< hotspots[t][0].length; c++){
-				hotspots[t][0][c] = 10;
-				hotspots[t][hotspots[t].length-1][c] = 10;
-			}
-		}
-		shotsFired = 0;
-		shotsHit = 0;
-		timestep = 0;
-		
-		initialized = true;
-	}	
-	
-	
+
 	public void run() 
 	{
+	  
+		//set up the environment during the first run command
 		if(!initialized)
-			initialize();
-		while(true)
 		{
-			
-			//Make the gun and radar turn independently
+			env.initialize(getBattleFieldWidth(), getBattleFieldHeight());
+	      
+	      	//Make the gun and radar turn independently
 			setAdjustRadarForGunTurn(true);
 			setAdjustGunForRobotTurn(true);
 			
-			Random rand = new Random();
-			setAhead(40000);
-			if(rand.nextBoolean())
-			   setTurnRight(rand.nextInt(90));
-			else setTurnLeft(rand.nextInt(90));
+			initialized = true;
+	    }
 			
-			turnRadarRight(360);
-			wallAvoidance();
+		while(true)
+		{
+			env.setupMap(0);
 			
-			updateMap();
+			int direction = plan.navigate();
+			execute(direction);
 	
 		}
 	}
-
 	
-	public void setMovement()
-	{
-		navigate();
-		ahead(100);
-	//	moveRandomly();	
-	}
-	
-	public void navigate()
+	public void execute(int dir)
 	{
 		
-		
-	}
-	
-	public void setRadar()
-	{
-		setTurnRadarRight(360);
-	}
-	
-	public void updateMap()
-	{
-		//for now, just reset the map to t=1 until it is looping through timestamps of future locations
-		//will need to create a template map for each timestamp
-		hotspots[0] = hotspots[1].clone();
-		
-		Location loc = targets.getTarget().getLocation();
-		
-		hotspots[0][(int)loc.getX()/GRANULARITY][(int)loc.getY()/GRANULARITY] += 1;
-
-
-
-/*
-		int xMinus = (int)(Math.max(0, loc.getX() - 100))/GRANULARITY;
-		int xPlus = (int)(Math.min(hotspots[0][0].length-1, loc.getX() + 100))/GRANULARITY;
-		int yMinus = (int)(Math.max(0, loc.getY() - 100))/GRANULARITY;
-		int yPlus = (int)(Math.min(hotspots[0].length-1, loc.getY() + 100))/GRANULARITY;
-		
-		for(int i=0; i<(int)AVOIDANCE_RADIUS/GRANULARITY; i++){
-			hotspots[0][xMinus+i][yMinus] +=1;
-			hotspots[0][xMinus][yMinus+i] +=1;
-			hotspots[0][xPlus][yPlus-i] +=1;
-			hotspots[0][xPlus-i][yPlus] +=1;
-			
-			
-		}*/
-		
-		
-		
-	}
-	
-	
-	//BROKEN - causes 10000 calls to setXX method???
-	//move foreward, turn in random directions, and spin the radar constantly
-	public void moveRandomly()
-	{
-		Random rand = new Random();
-		setAhead(40000);
-		if(rand.nextBoolean())
-		   setTurnRight(rand.nextInt(90));
-		else setTurnLeft(rand.nextInt(90));
-	}
-	
-	public void wallAvoidance()
-	{
-		//if within one radii of the wall, turn around
-		if(getX() < radius || getY() < radius || getX() > getBattleFieldWidth()-radius || getY() > getBattleFieldHeight()-radius)
-   		{
-    		stop();
-    		turnRight(180);
-    		ahead(100);
-    		resume();
-    	}
-	}
+  	}
 	
 	public void aimFire(Location loc)
 	{
-		//only shoot if you are hitting the enemy
-		if(1.0 * shotsHit / shotsFired > CRITICAL_PERCENTAGE || shotsFired < 15){
+		//only shoot if you are hitting the enemy x percent of the time
+		if(1.0 * shotsHit / shotsFired > CRITICAL_PERCENTAGE || shotsFired < 15)
+		{
 			stop();
 			
 			Location here = new Location(getX(), getY());
@@ -183,13 +76,11 @@ public class Zeemus extends AdvancedRobot
 	
 
 	
-	//optimize turning for right and left, but don't turn if < n degrees difference
+	//optimize turning for right and left
 	public void turnGunCorrectly(double dir)
   	{
-	    double n = 0;
-	    
 	    //make sure the number is not greather than 360
-	    dir %= 360;
+	    robocode.util.Utils.normalAbsoluteAngleDegrees(dir);
 	    
 	    //dir is now how far to turn right
 	    dir -= getGunHeading(); 
@@ -201,7 +92,8 @@ public class Zeemus extends AdvancedRobot
 	    	dir *= (-1);
 	    	right = !right;
 	    }
-	    else if(dir > 180){
+	    else if(dir > 180)
+	    {
 	    	dir -= 180;
 	    	right = !right;
 	    	
@@ -226,10 +118,97 @@ public class Zeemus extends AdvancedRobot
 	
 	public void onPaint(Graphics2D g)
 	{
-		// just paint the first timestep for now
-		for(int t=0; t<TIMESCALE; t++){
-			for(int r=0; r< hotspots[t].length; r++){
-				for(int c=0; c< hotspots[t][r].length; c++){
+	   env.paint(g);
+	}
+}
+
+class Environment
+{
+    //for setting up a map of dangerous locations, where a zero indicates safe and an integer
+    //indicates a degree of danger
+	int[][][] hotspots;
+	//the amount of pixels per index in the map
+	int GRANULARITY = 10;
+	//the amount of timesteps in the map
+	int TIMESCALE = 7;
+	
+	TargetList targets;
+  
+  
+  
+	public Environment(TargetList t)
+	{
+		targets = t;
+  	}	
+	
+	public void initialize(double w, double h)
+	{
+	
+		hotspots = new int[TIMESCALE][(int)w/GRANULARITY][(int)h/GRANULARITY];	
+		for(int t=0; t<TIMESCALE; t++)
+		{
+			resetMap(t);
+		}
+	}
+	 
+	//set up so that the edges of the map are dangerous and all other indices are zero
+	public void resetMap(int t)
+	{
+		for(int c=0; c< hotspots[t].length; c++)
+		{
+			for(int r=0; r< hotspots[t][c].length; r++)
+			{
+			hotspots[t][c][r] = 0;
+			hotspots[t][c][0] = 10;
+			hotspots[t][c][hotspots[t][0].length-1] = 10;
+			hotspots[t][0][r] = 10;
+			hotspots[t][hotspots[t].length-1][r] = 10;
+			}
+		}
+	} 
+	
+	//set all positions of the map which might be dangerous
+	public void setupMap(int t)
+	{
+		resetMap(t);
+		
+		if(!targets.isEmpty())
+		{
+			Location loc = targets.getTarget().getLocation();
+			
+			//this line produced an arrayIndexOutOfBoundsException at -2, which must mean that targetList is 
+			//producing invalid locations
+			hotspots[0][(int)loc.getX()/GRANULARITY][(int)loc.getY()/GRANULARITY] += 1;
+		}
+	}
+
+	
+	
+
+		
+	public int getTimescale()
+	{
+    return TIMESCALE;
+    }
+  
+  public void paint(Graphics2D g)
+  {
+    //store the painter in case there is some setting I don't know about
+		Paint tempPaint = g.getPaint();  
+		
+		//paint the walls
+		g.draw(new Rectangle(0,0,hotspots[0].length*GRANULARITY,GRANULARITY));//left	                                 
+		g.draw(new Rectangle((hotspots[0].length-1)*GRANULARITY,0,hotspots[0].length*GRANULARITY,GRANULARITY));//right		
+		g.draw(new Rectangle(0,(hotspots[0][0].length-1)*GRANULARITY,GRANULARITY,hotspots[0].length*GRANULARITY));//top	
+		g.draw(new Rectangle(0,0,GRANULARITY,hotspots[0].length*GRANULARITY));//bottom
+		
+
+		g.setPaint(new Color(255,0,0));
+		
+    // just paint the first timestep for now		
+		for(int t=0; t<1; t++){
+			for(int r=1; r< hotspots[t].length-1; r++){
+				for(int c=1; c< hotspots[t][r].length-1; c++){
 					if(hotspots[t][r][c] > 0){
 						Rectangle box = new Rectangle(r*GRANULARITY,c*GRANULARITY,GRANULARITY,GRANULARITY);
 						g.draw(box);
@@ -238,40 +217,151 @@ public class Zeemus extends AdvancedRobot
 			}
 		}
 		
+		g.setPaint(tempPaint);
 		
-	}
-     
-	
+  } 	
 }
 
+class Planner
+{
+
+  //the timestep representing the present.  Time cycles through the last dimension of the matrix
+	//for example:  when timestep is at 29, the next tick is in hotspots[r][c][0]
+	int timestep;
+
+	//temporary variable to set how far away from enemies is dangerous, should be set by a learning method of some kind
+	//temporarily unused
+	int avoidanceRadius;
+	
+	Environment env;
+	
+	//An array of integers, each representing a single possible action. 
+//	int[] directionList = new int[env.getTimescale()];
+  int[] directionList = new int[1];
+  
+  public Planner(Environment e)
+  {
+    timestep = 0;
+    env = e;
+    avoidanceRadius = 100;
+  } 
+
+
+  public int navigate()
+	{
+	  directionList[0] = getRandomDirection(); 
+	//	int answer = recursiveAvoidance(env, directionList, getX(), getY(), getHeading(), getVelocity(), 0, 0, TIMESCALE-1);
+		
+		
+		
+		
+		return 0;
+	}
+	
+	public int getRandomDirection()
+	{
+    Random rand = robocode.util.Utils.getRandom();
+    return rand.nextInt();
+	}
+	
+	public int recursiveAvoidance(Environment env, int[] directionList, double x, double y, double heading, double velocity, int time, int sum, int recursesLeft)
+	{
+		int min = 10000000;
+		
+		if(recursesLeft <= 0)
+			return sum;
+		
+		
+		int xMod = 0;
+		int yMod = 0;
+		double headingMod = 0;
+		double velocityMod = 0;
+		
+		switch(directionList[time]){
+			
+			//case for start of method
+			case 0: break;
+			
+			//ahead left
+			case 1: break;
+			
+			//left (will go right if velocity = -X)
+			case 11: break;
+			
+			//back left (will go right)
+			case 21: break;
+			
+			//ahead straight
+			case 101: break;
+			
+			//stop
+			case 111: break;
+			
+			//straight back
+			case 121: break;
+			
+			//ahead right
+			case 201: break;
+			
+			//right (will go left if velocity = -X)
+			case 211: break;
+			
+			//back right (will go right)
+			case 221: break;
+			
+		}
+		
+		//will add a granularity factor
+		time += 1;
+		
+		sum+= env.hotspots[time][(int)x/env.GRANULARITY][(int)y/env.GRANULARITY];
+		
+		for(int i=0; i<9; i++)
+		{
+			int dir = 1;
+			dir+= (i/3) * 10;
+			dir+= (i%3) * 100;
+			
+			directionList[time] = dir;
+			
+			int heat = recursiveAvoidance(env, directionList, x+xMod, y+yMod, heading+headingMod, velocity+velocityMod, time, sum, recursesLeft-1);
+
+		}
+
+		return 0;
+	}
+}
+
+// Maintains a list of targets and decides which target to pursue
+// Contains a class to predict where the enemy will be next
 class TargetList
 {
-	public  ArrayList<BotLog> log;
+	public  ArrayList<BotLog> list;
 		
 	public TargetList(){
-		log = new ArrayList<BotLog>();
+		list = new ArrayList<BotLog>();
 	}	
 	
 	public  boolean isEmpty()
 	{
-		return log.size()<1;
+		return list.size()<1;
 	}
 	
 	public  void logRobot(ScannedRobotEvent e, double x, double y, double heading)
 	{
 		boolean newbot = true;
-		for(int i=0; i<log.size(); i++)
+		for(int i=0; i<list.size(); i++)
 		{
 			//if this robot is already in the list then update him
-			if(log.get(i).getName().equals(e.getName()))
+			if(list.get(i).getName().equals(e.getName()))
 			{
 				newbot = false;
-				log.get(i).logRobot(e,x,y,heading);
+				list.get(i).logRobot(e,x,y,heading);
 			}
 		}
 		
 		if(newbot){
-			log.add(new BotLog(e,x,y,heading));
+			list.add(new BotLog(e,x,y,heading));
 		}
 	}
 	
@@ -309,7 +399,12 @@ class TargetList
 	{
 		if(isEmpty())
 			return null;
-		return log.get(0).getLast();
+		return list.get(0).getLast();
+	}
+	
+	public void getTargets()
+	{
+		return;
 	}
 }
 
@@ -318,29 +413,29 @@ class TargetList
 //Manages a list of events for each robot
 class BotLog
 {
-	public  ArrayList<Bot> list;
+	public  ArrayList<Bot> log;
 	private  String name;
 	
 	public BotLog()
 	{
-		list = new ArrayList<Bot>();
+		log = new ArrayList<Bot>();
 		name = null;
 	}
 	
 	public BotLog(ScannedRobotEvent e, double x, double y, double heading)
 	{
-		list = new ArrayList<Bot>();
+		log = new ArrayList<Bot>();
 		name = e.getName();
 		logRobot(e,x,y,heading);
 	}
 	
 	public void logRobot(ScannedRobotEvent e, double x, double y, double heading)
 	{
-		list.add(new Bot(e,x,y,heading));		
+		log.add(new Bot(e,x,y,heading));		
 	}
 	
 	public Bot getLast(){
-		return list.get(list.size()-1);
+		return log.get(log.size()-1);
 	}
 	
 	public String getName(){
@@ -349,7 +444,7 @@ class BotLog
 	
 	public boolean isEmpty()
 	{
-		return list.size()<1;
+		return log.size()<1;
 	}
 }
 
@@ -416,6 +511,8 @@ class Location
 		//add the x and y components of their distance to your x and y
 		x = sentX + distance * Math.sin(Math.toRadians(direction));
 		y = sentY + distance * Math.cos(Math.toRadians(direction));
+		x = Math.max(0,x);
+		y = Math.max(0,y);
 		
 	}
 
@@ -446,6 +543,23 @@ class Location
 
 	
                      /********* Code snippets
+
+   
+/*
+ *For setting the area around an enemy as dangerous
+ *
+		int xMinus = (int)(Math.max(0, loc.getX() - 100))/GRANULARITY;
+		int xPlus = (int)(Math.min(hotspots[0][0].length-1, loc.getX() + 100))/GRANULARITY;
+		int yMinus = (int)(Math.max(0, loc.getY() - 100))/GRANULARITY;
+		int yPlus = (int)(Math.min(hotspots[0].length-1, loc.getY() + 100))/GRANULARITY;
+		
+		for(int i=0; i<(int)AVOIDANCE_RADIUS/GRANULARITY; i++){
+			hotspots[0][xMinus+i][yMinus] +=1;
+			hotspots[0][xMinus][yMinus+i] +=1;
+			hotspots[0][xPlus][yPlus-i] +=1;
+			hotspots[0][xPlus-i][yPlus] +=1;
+
+
 
 
 				//Reading files		             /////////////////////////
@@ -492,70 +606,42 @@ class Location
 	
 	//////////////////////////////
 	
-			
-
-  
-     public void wallAvoidance()
-  {
-  	//store variables temporarily to decrease method calls
-  	double tempHeading = getHeading();
-  	double tempX = getX();
-  	double tempY = getY();
-  	
-    //if approaching a corner, turn around
-    
-    //top left
-    if(tempX < 2*radius && tempY < 2*radius)
-    	turnLeft(180);
-    //bottom right
-    if(tempX < 2*radius && tempY > getBattleFieldWidth() - radius)
-    	turnLeft(180);;
-    //top left
-    if(tempX > getBattleFieldHeight() - radius && tempY < 2*radius)
-    	turnLeft(180);
-    //top right
-    if(tempX > getBattleFieldHeight() - radius && tempY > getBattleFieldWidth() - radius)
-    	turnLeft(180);
-
-    //if within one radii of the wall, begin turning around
-    //turn around at least 90 degrees, and a full 180 if you are 
-    //approaching straight on
-    
-    //else is present not because the criteria are exclusive, but only because
-    //it would not be good to enact both turning behaviors   	
-    else if(tempX < radius)
-    {
-      if(tempHeading >= 270)
-        turnRight(Math.abs(Math.cos(tempHeading))*90+90);
-      else 
-      	turnLeft(Math.abs(Math.cos(tempHeading))*90+90);
-    }           
-    else if(tempY < radius)
-    {
-      if(tempHeading >= 180)
-        turnRight(Math.abs(Math.sin(tempHeading))*90+90);
-      else 
-      	turnLeft(Math.abs(Math.sin(tempHeading))*90+90);
-    }
-    else if(tempX > getBattleFieldWidth()-radius)
-    {
-      if(tempHeading >= 90)
-        turnRight(Math.abs(Math.cos(tempHeading))*90+90);
-      else 
-      	turnLeft(Math.abs(Math.cos(tempHeading))*90+90);
-    }	
-    else if(tempY > getBattleFieldHeight()-radius)
-    {
-      if(tempHeading > 0 && tempHeading < 180)
-        turnRight(Math.abs(Math.sin(tempHeading))*90+90);
-      else 
-      	turnLeft(Math.abs(Math.sin(tempHeading))*90+90);
-    }
-
-    ahead(100);
-  }	
-  	
+	
+	
+	//BROKEN - causes 10000 calls to setXX method???
+	//move foreward, turn in random directions, and spin the radar constantly
+	public void moveRandomly()
+	{
+		Random rand = new Random();
+		setAhead(40000);
+		if(rand.nextBoolean())
+		   setTurnRight(rand.nextInt(90));
+		else setTurnLeft(rand.nextInt(90));
+	}
+	
+	
+	
 	////////////////////////////////////////
+	
+	
+		public void setMovement()
+	{
+		ahead(100);
+	}
+	
+	
+
+	
+	public void setRadar()
+	{
+		setTurnRadarRight(360);
+	}
 			
+			
+			
+			
+
+	
+
 			
 			******/
