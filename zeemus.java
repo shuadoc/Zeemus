@@ -7,13 +7,18 @@ import java.io.*;
 import java.util.*;
 
 
+//right now many methods and classes have half implementations or mixed implementations.  I really need to clean everything up
+
+
+
+
 public class Zeemus extends AdvancedRobot
 {
-	TargetList targets = new TargetList();
+	TargetList targets;
 	
-	Environment env = new Environment(targets);
+	Environment env;
 	
-	Planner plan = new Planner(env);
+	Planner plan;
 	
 	//for the initial setup of the environment
 	boolean initialized = false;
@@ -23,6 +28,7 @@ public class Zeemus extends AdvancedRobot
 	public int shotsHit = 0;
 	//stop firing if hit percentage falls below this amount
 	public double CRITICAL_PERCENTAGE = .2;
+
 	
 
 	public void run() 
@@ -31,7 +37,9 @@ public class Zeemus extends AdvancedRobot
 		//set up the environment during the first run command
 		if(!initialized)
 		{
-			env.initialize(getBattleFieldWidth(), getBattleFieldHeight());
+			targets = new TargetList(getBattleFieldWidth(), getBattleFieldHeight());
+			env = new Environment(targets, getBattleFieldWidth(), getBattleFieldHeight());
+			plan  = new Planner(env);
 	      
 	      	//Make the gun and radar turn independently
 			setAdjustRadarForGunTurn(true);
@@ -42,24 +50,73 @@ public class Zeemus extends AdvancedRobot
 			
 		while(true)
 		{
-			env.setupMap(0);
+			//log yourself.  Zeemus will always occupy targets.get(0);
+			targets.logSelf(getName(),getEnergy(), getHeading(), getVelocity(), getX(), getY());
 			
-			int direction = plan.navigate();
-			execute(direction);
+			env.setupMap();
+
+			plan.navigate();
+			int direction = plan.getNextDirection();
+			setDirection(direction);
+			System.out.println("" + direction);
+			
+			setRadar();
+			
+			//execute directions which have been set
+			execute();
 	
 		}
 	}
 	
-	public void execute(int dir)
+	public void setDirection(int dir)
 	{
 		
+		if(dir == 0)
+			turnRadarLeft(360);
+			
+		switch(dir/100)
+			{
+				
+				//case for start of method
+				case 0:
+					setTurnLeft(100);
+					break;
+				case 1:
+					setTurnLeft(0);
+					break;
+				case 2:
+					setTurnRight(100);
+					break;
+				
+			}
+			
+		switch((dir%100)/10)
+			{
+				
+				//case for start of method
+				case 0:
+					setAhead(100);
+					break;
+				case 1: 
+					setAhead(0);
+					break;
+				case 2:
+					setBack(100);
+					break;
+				
+			}
+  	}
+  	
+  	public void setRadar()
+  	{
+  		setTurnRadarRight(360);
   	}
 	
-	public void aimFire(Location loc)
+	public void aimFire(int power, Location loc)
 	{
 		//only shoot if you are hitting the enemy x percent of the time
-		if(1.0 * shotsHit / shotsFired > CRITICAL_PERCENTAGE || shotsFired < 15)
-		{
+		//if(1.0 * shotsHit / shotsFired > CRITICAL_PERCENTAGE || shotsFired < 15)
+		//{
 			stop();
 			
 			Location here = new Location(getX(), getY());
@@ -67,16 +124,17 @@ public class Zeemus extends AdvancedRobot
 			Location temp = new Location(Math.min(getBattleFieldWidth(),Math.max(0,loc.getX())),Math.min(getBattleFieldHeight(),Math.max(0,loc.getY())));
 			
 			turnGunCorrectly(here.degreeTo(temp));
-			fire(1);
+			fire(power);
 			shotsFired++;
 			
 			resume();
-		}
+		//}
 	}
 	
 
 	
 	//optimize turning for right and left
+	//!!! currently every time the enemy passes over zeemus the gun turns the wrong direction
 	public void turnGunCorrectly(double dir)
   	{
 	    //make sure the number is not greather than 360
@@ -104,11 +162,11 @@ public class Zeemus extends AdvancedRobot
 	    return;
 	}
   
-	//When scanning a robot, just tell the BotLog to deal with it
+	//When scanning a robot, just tell the InstanceLog to deal with it
 	public void onScannedRobot(ScannedRobotEvent e) 
 	{
-		targets.logRobot(e, getX(), getY(), getHeading());
-		aimFire(targets.estimatePos(1, new Location(getX(),getY())));
+		targets.logInstance(e, getX(), getY(), getHeading());
+//		aimFire(2, targets.getTarget().getFiringPosition(2, new Location(getX(),getY())));
 	}
 	
 	public void onBulletHit(BulletHitEvent e)
@@ -120,36 +178,43 @@ public class Zeemus extends AdvancedRobot
 	{
 	   env.paint(g);
 	}
+	
+	public void onHitWall(HitWallEvent e)
+	{
+		System.out.println("Hit Wall!");
+	}
 }
 
 class Environment
 {
     //for setting up a map of dangerous locations, where a zero indicates safe and an integer
     //indicates a degree of danger
+    //currently there is no utilization of the first dimension of the matrix
 	int[][][] hotspots;
 	//the amount of pixels per index in the map
 	int GRANULARITY = 10;
 	//the amount of timesteps in the map
-	int TIMESCALE = 7;
+	int TIMESCALE = 42;
+	
+	ArrayList<Location> locsToPaint= new ArrayList<Location>();
 	
 	TargetList targets;
-  
-  
-  
-	public Environment(TargetList t)
-	{
-		targets = t;
-  	}	
 	
-	public void initialize(double w, double h)
+	double height, width;
+  
+  
+  
+	public Environment(TargetList tl, double w, double h)
 	{
-	
+		targets = tl;
+		height = h;
+		width = w;
 		hotspots = new int[TIMESCALE][(int)w/GRANULARITY][(int)h/GRANULARITY];	
 		for(int t=0; t<TIMESCALE; t++)
 		{
 			resetMap(t);
 		}
-	}
+  	}
 	 
 	//set up so that the edges of the map are dangerous and all other indices are zero
 	public void resetMap(int t)
@@ -168,31 +233,47 @@ class Environment
 	} 
 	
 	//set all positions of the map which might be dangerous
-	public void setupMap(int t)
+	public void setupMap()
 	{
-		resetMap(t);
+		locsToPaint = new ArrayList<Location>();
 		
 		if(!targets.isEmpty())
 		{
-			Location loc = targets.getTarget().getLocation();
-			
-			//this line produced an arrayIndexOutOfBoundsException at -2, which must mean that targetList is 
-			//producing invalid locations
-			hotspots[0][(int)loc.getX()/GRANULARITY][(int)loc.getY()/GRANULARITY] += 1;
+			for(int t = 0; t < TIMESCALE; t++)
+			{
+				resetMap(t);
+				Location loc = targets.getTarget().predictFutureLocation(t);
+				hotspots[t][(int)loc.getX()/GRANULARITY][(int)loc.getY()/GRANULARITY] += 1;
+			}
 		}
 	}
-
 	
+	public int checkMap(int t, double x, double y)
+	{
+		x = Math.min(Math.max(0,x),799);
+		y = Math.min(Math.max(0,y),599);
+		addLoc(new Location(x,y));
+		return hotspots[t][(int)x/GRANULARITY][(int)y/GRANULARITY];
+	}
 	
+	public TargetList getTargets()
+	{
+		return targets;
+	}
 
 		
 	public int getTimescale()
 	{
     return TIMESCALE;
     }
+    
+    public void addLoc(Location loc)
+    {
+    	locsToPaint.add(loc);
+    }
   
-  public void paint(Graphics2D g)
-  {
+	public void paint(Graphics2D g)
+	{
     //store the painter in case there is some setting I don't know about
 		Paint tempPaint = g.getPaint();  
 		
@@ -205,7 +286,7 @@ class Environment
 
 		g.setPaint(new Color(255,0,0));
 		
-    // just paint the first timestep for now		
+     // just paint the first timestep for now		
 		for(int t=0; t<1; t++){
 			for(int r=1; r< hotspots[t].length-1; r++){
 				for(int c=1; c< hotspots[t][r].length-1; c++){
@@ -216,6 +297,22 @@ class Environment
 				}
 			}
 		}
+		if(!targets.isEmpty())
+		{
+			//produces null pointer exceptions ocassionally
+			Location zee = targets.getTarget(0).getLastLocation();
+			Location fPosition = targets.getTarget().getFiringPosition(2,zee);
+			g.setPaint(new Color(250,165,0));
+			g.draw(new Rectangle((int)fPosition.getX(), (int)fPosition.getY(),GRANULARITY,GRANULARITY));
+		}
+		
+		
+		//paint the areas of the map that avoidance is considering
+		for(int i=0; i<locsToPaint.size(); i++)
+		{
+			g.setPaint(new Color(0, Math.max(255 - (i*10),0) , Math.min(255, 50+(i*10))));
+			g.draw(new Rectangle((int)locsToPaint.get(i).getX(), (int)locsToPaint.get(i).getY(), 2,2));
+		}
 		
 		g.setPaint(tempPaint);
 		
@@ -223,10 +320,10 @@ class Environment
 }
 
 class Planner
-{
+{	
 
-  //the timestep representing the present.  Time cycles through the last dimension of the matrix
-	//for example:  when timestep is at 29, the next tick is in hotspots[r][c][0]
+  	//the timestep representing the present.  Time cycles through the last dimension of the matrix
+	//for example:  when timestep is at 29, the next tick is in hotspots[0][r][c]
 	int timestep;
 
 	//temporary variable to set how far away from enemies is dangerous, should be set by a learning method of some kind
@@ -235,100 +332,169 @@ class Planner
 	
 	Environment env;
 	
-	//An array of integers, each representing a single possible action. 
-//	int[] directionList = new int[env.getTimescale()];
-  int[] directionList = new int[1];
-  
-  public Planner(Environment e)
-  {
-    timestep = 0;
-    env = e;
-    avoidanceRadius = 100;
-  } 
+	//A LinkedList of integers, each representing a single possible action.
+	LinkedList<Integer> directions;
+	
+	public Planner(Environment e)
+	{
+		timestep = 0;
+		env = e;
+    	avoidanceRadius = 100;
+    	directions  = new LinkedList<Integer>();
+
+		int dir = getRandomDirection();
+		for(int i=0; i<20; i++)
+			directions.add(dir);
+  	}
+  	
+  	public int getNextDirection()
+  	{
+  		return (int)directions.remove();
+  	}
 
 
-  public int navigate()
+  	public void navigate()
 	{
-	  directionList[0] = getRandomDirection(); 
-	//	int answer = recursiveAvoidance(env, directionList, getX(), getY(), getHeading(), getVelocity(), 0, 0, TIMESCALE-1);
+		Target t = env.getTargets().getTarget(0);
 		
-		
-		
-		
-		return 0;
-	}
-	
-	public int getRandomDirection()
-	{
-    Random rand = robocode.util.Utils.getRandom();
-    return rand.nextInt();
-	}
-	
-	public int recursiveAvoidance(Environment env, int[] directionList, double x, double y, double heading, double velocity, int time, int sum, int recursesLeft)
-	{
-		int min = 10000000;
-		
-		if(recursesLeft <= 0)
-			return sum;
-		
-		
-		int xMod = 0;
-		int yMod = 0;
-		double headingMod = 0;
-		double velocityMod = 0;
-		
-		switch(directionList[time]){
-			
-			//case for start of method
-			case 0: break;
-			
-			//ahead left
-			case 1: break;
-			
-			//left (will go right if velocity = -X)
-			case 11: break;
-			
-			//back left (will go right)
-			case 21: break;
-			
-			//ahead straight
-			case 101: break;
-			
-			//stop
-			case 111: break;
-			
-			//straight back
-			case 121: break;
-			
-			//ahead right
-			case 201: break;
-			
-			//right (will go left if velocity = -X)
-			case 211: break;
-			
-			//back right (will go right)
-			case 221: break;
-			
+		if(directions.size() <= 20)
+		{
+			int dir = getRandomDirection();
+			for(int i=0; i<20; i++)
+				directions.add(dir);
 		}
 		
-		//will add a granularity factor
-		time += 1;
+		//check if the next five directions will hit something
+		if(checkDirections(20, t.getLastLocation().getX(), t.getLastLocation().getY(), t.getLastInstance().getHeading(), t.getLastInstance().getVelocity(),0) > 0)
+		{
+			int dir = avoidance(env,t.getLastLocation().getX(), t.getLastLocation().getY(), t.getLastInstance().getHeading(), t.getLastInstance().getVelocity(), 0, 0, 20);
+			System.out.println(dir);
+			
 		
-		sum+= env.hotspots[time][(int)x/env.GRANULARITY][(int)y/env.GRANULARITY];
+			for(int i=0; i<20; i++)
+			{
+				directions.remove();
+			}
+			
+			for(int i=0; i<20; i++)
+			{
+				directions.addFirst(dir);
+			}
+		}
+	}
+	
+	
+	//checks the possible directions for obstacles
+	private int avoidance(Environment env, double x, double y, double heading, double velocity, int time, int sum, int n)
+	{
+		int min = 10000000;
+		int minDir = 0;
 		
+		Target t = env.getTargets().getTarget(0);
+				
 		for(int i=0; i<9; i++)
 		{
 			int dir = 1;
 			dir+= (i/3) * 10;
 			dir+= (i%3) * 100;
 			
-			directionList[time] = dir;
+			for(int j=0; j<n; j++)
+			{
+				directions.addFirst(dir);
+			}
 			
-			int heat = recursiveAvoidance(env, directionList, x+xMod, y+yMod, heading+headingMod, velocity+velocityMod, time, sum, recursesLeft-1);
+			int heat = checkDirections(20, t.getLastLocation().getX(), t.getLastLocation().getY(), t.getLastInstance().getHeading(), t.getLastInstance().getVelocity(),0);
+			
+			System.out.println(":"+heat);
+			
+			if(heat < min){
+				min = heat;
+				minDir = dir;
+			}		
+			
+			for(int j=0; j<n; j++)
+			{
+				directions.remove();
+			}
 
 		}
 
-		return 0;
+		return minDir;
+	}
+
+	
+	//check the next n directions for obstacles
+	private int checkDirections(int n, double x, double y, double heading, double velocity, int t)
+	{		
+		int sum = 0;
+		
+		for(int i=0; i<n; i++){
+			
+			t++;
+			
+			if(directions.get(i) <= 0)
+				return 0;
+			switch(directions.get(i)/100)
+				{
+					
+					//case for start of method
+					case 0:
+						heading -= (10 - 0.75*Math.abs(velocity));
+						break;
+					case 1: 
+						break;
+					case 2:
+						heading += (10 - 0.75*Math.abs(velocity));
+						break;
+					
+				}
+				
+				heading += 360;
+				heading %= 360;
+				
+			switch((directions.get(i)%100)/10)
+				{
+					
+					//case for start of method
+					case 0:
+						velocity = Math.min(8, velocity+1);
+						break;
+					case 1: 
+						if(velocity == 1)
+							velocity =0;
+						else if(velocity > 0 )
+							velocity -= 2;
+						else if(velocity == -1)
+							velocity = 0;
+						else if(velocity < 0 )
+							velocity +=2;
+						break;
+					case 2:
+						velocity = Math.max(-8, velocity - 1);
+						break;
+					
+				}
+				
+				x += Math.sin(Math.toRadians(heading)) * velocity;
+				y += Math.cos(Math.toRadians(heading)) * velocity;
+				
+				x = Math.max(Math.min(x,800),0);
+				y = Math.max(Math.min(y,600),0);
+				
+				sum += env.checkMap(t, x, y);
+			}
+			
+		return sum;		
+			
+	}
+	
+	private int getRandomDirection()
+	{
+	    Random rand = robocode.util.Utils.getRandom();
+	    int dir = 1; 					 	//recursive helper dummy direction = 0;
+	    dir += rand.nextInt(2) * 20; 		//either a zero or a two, ahead or back
+	    dir += rand.nextInt(3) * 100; 		//left, straight, or right
+	    return dir;
 	}
 }
 
@@ -336,110 +502,204 @@ class Planner
 // Contains a class to predict where the enemy will be next
 class TargetList
 {
-	public  ArrayList<BotLog> list;
+	public  ArrayList<Target> tlist;
+	private double height, width;
 		
-	public TargetList(){
-		list = new ArrayList<BotLog>();
+	public TargetList(double w, double h)
+	{
+		tlist = new ArrayList<Target>();
+		height = h;
+		width = w;
 	}	
 	
+	//If it is empty OtherThanZeemus
 	public  boolean isEmpty()
 	{
-		return list.size()<1;
+		return tlist.size()<2;
 	}
 	
-	public  void logRobot(ScannedRobotEvent e, double x, double y, double heading)
+	public  void logInstance(ScannedRobotEvent e, double x, double y, double heading)
 	{
 		boolean newbot = true;
-		for(int i=0; i<list.size(); i++)
+		for(int i=0; i<tlist.size(); i++)
 		{
 			//if this robot is already in the list then update him
-			if(list.get(i).getName().equals(e.getName()))
+			if(tlist.get(i).getName().equals(e.getName()))
 			{
 				newbot = false;
-				list.get(i).logRobot(e,x,y,heading);
+				tlist.get(i).logInstance(e, x, y, heading);
 			}
 		}
 		
-		if(newbot){
-			list.add(new BotLog(e,x,y,heading));
+		if(newbot)
+		{
+			tlist.add(new Target(e, x, y, heading, width, height));
 		}
 	}
 	
-	
-	//take robot's heading, velocity, and distace to robot
-	//estimate where they will be when the bullet arrives
-	public  Location estimatePos(int power , Location zee)
+	//needs to start with the initialize method
+	public void logSelf(String name ,double energy, double heading, double velocity, double x, double y)
 	{
-		Bot target = getTarget();
-		return estimatePostitionHelper(zee, power, target.getVelocity(), target.getHeading(), 0, target.getLocation(), 5);	
+		boolean newbot = true;
 
-	}
-	
-	//Helper method uses recursion to approximate future location
-	public Location estimatePostitionHelper(Location zee, double power, double velocity, double heading, double priorDistance, Location loc, int recurseNum)
-	{
-		if(recurseNum <= 0)
-			return loc;
-		double distance = Math.sqrt(Math.pow(loc.getX()-zee.getX() , 2) + Math.pow(loc.getY()-zee.getY() , 2));
-		distance -= priorDistance;
-		double time = distance / (20 - power*3);
-		
-		double x = loc.getX() + velocity * time * (Math.sin(Math.toRadians(heading)));
-		double y = loc.getY() + velocity * time * (Math.cos(Math.toRadians(heading)));
-		
-		Location update = new Location(x,y);
-		
-		return estimatePostitionHelper(zee, power, velocity, heading, distance+priorDistance, update, recurseNum-1);
-		
-	}
+		//if this robot is already in the list then update him
+		if(tlist.size()!=0)
+			tlist.get(0).logSelf(energy, heading, velocity, x, y);
+		else
+			tlist.add(new Target(name, energy, heading, velocity, x, y, width, height));
+	}		
 		
 		
-	//return the closest target for now
-	public  Bot getTarget()
+	//return the first target seen for now
+	public  Target getTarget()
 	{
 		if(isEmpty())
 			return null;
-		return list.get(0).getLast();
+		return tlist.get(1);
 	}
 	
-	public void getTargets()
+	public Target getTarget(int i)
 	{
-		return;
+		return tlist.get(i);
+	}
+	
+	public ArrayList<Target> getTargets()
+	{
+		return tlist;
+	}
+}
+	
+class Target
+{
+	
+	private InstanceLog ilog;
+	private String name;
+	public double height, width;
+	
+	public Target()
+	{
+		name = "used default constructor";
+		ilog = new InstanceLog();		
+		
+	}
+	
+	public Target(String n ,double energy, double heading, double velocity, double x, double y, double w, double h)
+	{
+		name = n;
+		ilog = new InstanceLog();
+		ilog.logSelf(energy, heading, velocity, x, y);
+		height = h;
+		width = w;
+	}
+	
+	public Target(ScannedRobotEvent e, double x, double y, double heading, double w, double h)
+	{
+		name = e.getName();
+		ilog = new InstanceLog();
+		ilog.logInstance(e,x,y,heading);
+		height = h;
+		width = w;
+	}
+	
+	public void logInstance(ScannedRobotEvent e, double x, double y, double heading)
+	{
+		ilog.logInstance(e,x,y,heading);
+	}
+	
+	public void logSelf(double energy, double heading, double velocity, double x, double y)
+	{
+		ilog.logSelf(energy, heading, velocity, x, y);
+	}
+	
+	public String getName()
+	{
+		return name;
+	}
+	
+	public Instance getLastInstance()
+	{
+		return ilog.getLastInstance();
+	}
+	
+	public Location getLastLocation()
+	{
+		return ilog.getLastInstance().getLocation();
+	}
+	
+	
+	//Linear Estimation
+	//take robot's heading, velocity, and distace to robot
+	//estimate where they will be when the bullet arrives
+	//Location zee refers to the location of this robot (zeemus)
+	public  Location getFiringPosition(int power , Location zee)
+	{
+		return gfpHelper(zee, power, ilog.getLastInstance().getVelocity(), ilog.getLastInstance().getHeading(), 0, ilog.getLastInstance().getLocation(), 4);	
+	}
+	
+	//Helper method uses recursion to approximate future location
+	private Location gfpHelper(Location zee, double power, double velocity, double heading, double priorDistance, Location loc, int recurseNum)
+	{
+		//check if this is the last recurse
+		if(recurseNum <= 0)
+			return loc;
+			
+		//calculate the distance to the target from the enemies estimated position
+		double distance = Math.sqrt(Math.pow(loc.getX()-zee.getX() , 2) + Math.pow(loc.getY()-zee.getY() , 2));
+		
+		//update the amount of distance the calculation is now of by, and the amount of extra time the bullet will move
+		distance -= priorDistance;
+		double time = distance / (20 - power*3);
+		
+		//where will the enemy be after that amount of time has elapsed
+		Location update = predictFutureLocation(loc, velocity, time, heading);
+		
+		return gfpHelper(zee, power, velocity, heading, distance+priorDistance, update, recurseNum-1);
+		
+	}
+	
+	public Location predictFutureLocation(Location loc, double velocity, double time, double heading)
+	{
+		double x = loc.getX() + velocity * time * (Math.sin(Math.toRadians(heading)));
+		double y = loc.getY() + velocity * time * (Math.cos(Math.toRadians(heading)));
+		
+		x = Math.min(Math.max(x, 0), width-1);
+		y = Math.min(Math.max(y, 0), height-1);
+		
+		return new Location(x,y);
+		
+	}
+	
+	public Location predictFutureLocation(int time)
+	{
+		return predictFutureLocation(getLastLocation(), ilog.getLastInstance().getVelocity(), (double)time, ilog.getLastInstance().getHeading());
 	}
 }
 
 
 
 //Manages a list of events for each robot
-class BotLog
+class InstanceLog
 {
-	public  ArrayList<Bot> log;
-	private  String name;
+	private  ArrayList<Instance> log;
 	
-	public BotLog()
+	public InstanceLog()
 	{
-		log = new ArrayList<Bot>();
-		name = null;
+		log = new ArrayList<Instance>();
+	}
+
+	
+	public void logInstance(ScannedRobotEvent e, double x, double y, double heading)
+	{
+		log.add(new Instance(e,x,y,heading));		
 	}
 	
-	public BotLog(ScannedRobotEvent e, double x, double y, double heading)
+	public void logSelf(double energy, double heading, double velocity, double x, double y)
 	{
-		log = new ArrayList<Bot>();
-		name = e.getName();
-		logRobot(e,x,y,heading);
+		log.add(new Instance(energy, heading, velocity, x, y));
 	}
 	
-	public void logRobot(ScannedRobotEvent e, double x, double y, double heading)
-	{
-		log.add(new Bot(e,x,y,heading));		
-	}
-	
-	public Bot getLast(){
+	public Instance getLastInstance(){
 		return log.get(log.size()-1);
-	}
-	
-	public String getName(){
-		return name;
 	}
 	
 	public boolean isEmpty()
@@ -449,8 +709,9 @@ class BotLog
 }
 
 
+//!! need to update the time for each log
 //container for storing information on scanned robots
-class Bot
+class Instance
 {
 	private double heading;
 	private double energy;
@@ -459,7 +720,7 @@ class Bot
 	private long time;
 	private Location loc;
 		
-	public Bot(ScannedRobotEvent e , double x, double y, double h)
+	public Instance(ScannedRobotEvent e , double x, double y, double h)
 	{
 		heading = e.getHeading();
 		energy = e.getEnergy();
@@ -467,6 +728,15 @@ class Bot
 		velocity = e.getVelocity();
 		loc = new Location(e.getBearing(), distance, x, y, h);
 				
+	}
+	
+	public Instance(double e, double h, double v, double x, double y)
+	{
+		heading = h;
+		energy = e;
+		velocity = v;
+		loc = new Location(x,y);
+		distance = 0;		
 	}
 	
 	public  double getHeading(){
@@ -511,9 +781,15 @@ class Location
 		//add the x and y components of their distance to your x and y
 		x = sentX + distance * Math.sin(Math.toRadians(direction));
 		y = sentY + distance * Math.cos(Math.toRadians(direction));
+		
+		//make sure the result is in bounds
 		x = Math.max(0,x);
 		y = Math.max(0,y);
 		
+		//!!!!This method currently can return x and y values greater than the battlefield bounds
+		//IS NOT A ROBUST METHOD! is there a way to do this without sending the information?
+		x = Math.min(799, x);
+		y = Math.min(599, y);
 	}
 
 //  would it be better to move this logic outside of the constructor?	
@@ -636,6 +912,45 @@ class Location
 	{
 		setTurnRadarRight(360);
 	}
+	
+	//////////////////////////
+	
+	
+		
+	private int recursiveAvoidance(Environment env, double x, double y, double heading, double velocity, int time, int sum, int recursesLeft)
+	{
+		int min = 10000000;
+		
+		if(recursesLeft <= 0)
+			return sum;
+		
+		
+		int xMod = 0;
+		int yMod = 0;
+		double headingMod = 0;
+		double velocityMod = 0;
+		
+		//will add a granularity factor
+		time += 1;
+		
+		sum+= env.hotspots[time][(int)x/env.GRANULARITY][(int)y/env.GRANULARITY];
+		
+		for(int i=0; i<9; i++)
+		{
+			int dir = 1;
+			dir+= (i/3) * 10;
+			dir+= (i%3) * 100;
+			
+			directionList[time] = dir;
+			
+			int heat = recursiveAvoidance(env, directionList, x+xMod, y+yMod, heading+headingMod, velocity+velocityMod, time, sum, recursesLeft-1);
+
+		}
+
+		return 0;
+	}
+	
+	
 			
 			
 			
