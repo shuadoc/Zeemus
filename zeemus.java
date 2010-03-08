@@ -48,7 +48,7 @@ public class Zeemus extends AdvancedRobot
 		while(true)
 		{
 			//log yourself.  Zeemus will always occupy targets.get(0);
-			env.logSelf(getEnergy(), getHeading(), getVelocity(), new Location(getX(), getY()));
+			env.logSelf(getTime(), getEnergy(), getHeading(), getVelocity(), new Location(getX(), getY()));
 			
 			//reset the map including the dangerous locations for future timesteps
 			plan.setupMap();
@@ -233,7 +233,7 @@ class Planner
 				directions.add(dir);
 		}
 		
-		//check if the next five directions will hit something
+		//check if the next twenty directions will hit something
 		if(checkDirections(20, t.getLastLocation().getX(), t.getLastLocation().getY(), t.getLastInstance().getHeading(), t.getLastInstance().getVelocity(),0) > 0)
 		{
 			int dir = avoidance(env,t.getLastLocation().getX(), t.getLastLocation().getY(), t.getLastInstance().getHeading(), t.getLastInstance().getVelocity(), 0, 0, 20);			
@@ -523,9 +523,9 @@ class Environment
 		targets.logInstance(e, loc);
 	}
 	
-	public void logSelf(double energy, double heading, double velocity, Location loc)
+	public void logSelf(long time, double energy, double heading, double velocity, Location loc)
 	{
-		targets.logSelf(energy, heading, velocity, loc);
+		targets.logSelf(time, energy, heading, velocity, loc);
 	}
 	
 	public int checkMap(int t, double x, double y)
@@ -566,11 +566,11 @@ class Environment
 		
 		//paint the positions of various danger zones
 		for(int t=0; t<hotspots.length; t++){
-			g.setPaint(new Color((int)(255*(hotspots.length/(hotspots.length*(t+1)))), 0, 50));
+			g.setPaint(new Color((int)(255 - ( 255.0 * t/hotspots.length )), 0, 50));
 			for(int r=1; r< hotspots[t].length-1; r++){
 				for(int c=1; c< hotspots[t][r].length-1; c++){
 					if(hotspots[t][r][c] > 0){
-						Rectangle box = new Rectangle(r*GRANULARITY,c*GRANULARITY,Math.max(1,GRANULARITY-t/3),Math.max(1,GRANULARITY-t/3));
+						Rectangle box = new Rectangle(r*GRANULARITY, c*GRANULARITY, (t==0)?(10):(1) , (t==0)?(10):(2) );
 						g.draw(box);
 					}
 				}
@@ -654,9 +654,9 @@ class TargetList
 		}
 	}
 
-	public void logSelf(double energy, double heading, double velocity, Location loc)
+	public void logSelf(long time, double energy, double heading, double velocity, Location loc)
 	{
-		tlist.get(0).logSelf(energy, heading, velocity, loc);
+		tlist.get(0).logSelf(time, energy, heading, velocity, loc);
 	}		
 				
 	//return the first target seen for now
@@ -695,9 +695,9 @@ class Target
 		ilog.logInstance(e, loc);
 	}
 	
-	public void logSelf(double energy, double heading, double velocity, Location loc)
+	public void logSelf(long time, double energy, double heading, double velocity, Location loc)
 	{
-		ilog.logSelf(energy, heading, velocity, loc);
+		ilog.logSelf(time, energy, heading, velocity, loc);
 	}
 	
 	public String getName()
@@ -734,9 +734,9 @@ class InstanceLog
 		log.add(new Instance(e, loc));		
 	}
 	
-	public void logSelf(double energy, double heading, double velocity, Location loc)
+	public void logSelf(long time, double energy, double heading, double velocity, Location loc)
 	{
-		log.add(new Instance(energy, heading, velocity, loc));
+		log.add(new Instance(time, energy, heading, velocity, loc));
 	}
 	
 	public Instance getLastInstance(){
@@ -773,12 +773,14 @@ class Instance
 		energy = e.getEnergy();
 		distance = e.getDistance();
 		velocity = e.getVelocity();
+		time = e.getTime();
 		loc = l;
 				
 	}
 	
-	public Instance(double e, double h, double v,Location l)
+	public Instance(long t, double e, double h, double v,Location l)
 	{
+		time = t;
 		heading = h;
 		energy = e;
 		velocity = v;
@@ -800,6 +802,9 @@ class Instance
 	}
 	public  Location getLocation(){
 		return loc;
+	}
+	public long getTime(){
+		return time;
 	}
 	
 }
