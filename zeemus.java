@@ -15,53 +15,34 @@ public class Zeemus extends AdvancedRobot
 	
 	Predictor predictor;
 	
+	TargetList targets;
+	
 	//for the initial setup of the environment
-	boolean initialized = false;
-	
-	//log hit success rate
-	public int shotsFired = 0;
-	public int shotsHit = 0;
-	//stop firing if hit percentage falls below this amount
-	public double CRITICAL_PERCENTAGE = .2;
-
-	
-
+	boolean initialized = false;	
+		
 	public void run() 
 	{
 	  
-		//set up the environment during the first run command
 		if(!initialized)
 		{
-			env = new Environment(getBattleFieldWidth(), getBattleFieldHeight(), getName());
-			
-			predictor = new Predictor(env);
-				
-			plan  = new Planner(env, predictor);
-	      
-	      	//Make the gun and radar turn independently
-			setAdjustRadarForGunTurn(true);
-			setAdjustGunForRobotTurn(true);
-			
-			initialized = true;
-	    }
-			
+		  initialize();
+		  initialized = true;
+		}
+		
 		while(true)
 		{
-			//log yourself.  Zeemus will always occupy targets.get(0);
-			env.logSelf(getTime(), getEnergy(), getHeading(), getVelocity(), new Location(getX(), getY()));
+			//log yourself.  This robot will always occupy targets.get(0);
+			env.logSelf(getTime(), getEnergy(), getHeading(), getVelocity(), getRadar(), getTurret(), new Location(getX(), getY()));
 			
-			//reset the map including the dangerous locations for future timesteps
+			//reset the map of dangerous locations
 			plan.setupMap();
 			
 			//check the planned directions for obstacles
 			plan.navigate();
 			
-			//get the next directions and set them for the next call to execute
-			int direction = plan.getNextDirection();
-			setDirection(direction);
-			System.out.println("" + direction);
-			
-			setRadar();
+			//get the next direction and set it for the next call to execute
+			Direction dir = plan.getNextDirection();
+			setDirection(dir);
 			
 			//execute directions which have been set
 			execute();
@@ -69,72 +50,70 @@ public class Zeemus extends AdvancedRobot
 		}
 	}
 	
-	public void setDirection(int dir)
+	//set up the environment, planner, and predictor
+	public void initialize()
 	{
-		
-		if(dir == 0)
-			turnRadarLeft(360);
+		targets = new TargetList(getName());
+	     
+		env = new Environment(getBattleFieldWidth(), getBattleFieldHeight(), targets);
 			
-		switch(dir/100)
-			{
-				//left
-				case 0:
-					setTurnLeft(100);
-					break;
-				//straight
-				case 1:
-					setTurnLeft(0);
-					break;
-				//right
-				case 2:
-					setTurnRight(100);
-					break;
+		predictor = new Predictor(env);
 				
-			}
-			
-		switch((dir%100)/10)
-			{
-				//ahead
-				case 0:
-					setAhead(100);
-					break;
-				//stop (but still turn)
-				case 1: 
-					setAhead(0);
-					break;
-				//back
-				case 2:
-					setBack(100);
-					break;
-				
-			}
-  	}
-  	
-  	public void setRadar()
-  	{
-  		setTurnRadarRight(360);
-  	}
+		plan  = new Planner(targets, env, predictor);
+	      
+	    //Make the gun and radar turn independently
+		setAdjustRadarForGunTurn(true);
+		setAdjustGunForRobotTurn(true); 
+  }
 	
-	public void aimFire(int power, Location loc)
+	
+	public void setDirection(Direction dir)
+	{      	
+		
+		setAhead(dir.getSpeed());
+		setTurnRight(dir.getTurnRight());
+		setTurnRadarRight(dir.getRadarRight());
+
+	}
+
+	
+	public void fire(int power, Location enemyLoc)
 	{
-		//only shoot if you are hitting the enemy x percent of the time
-		//if(1.0 * shotsHit / shotsFired > CRITICAL_PERCENTAGE || shotsFired < 15)
-		//{
-			stop();
-			
+	    //get this robot's current location
 			Location here = new Location(getX(), getY());
-			//make sure the target you are firing at is in bounds
-			Location temp = new Location(Math.min(getBattleFieldWidth(),Math.max(0,loc.getX())),Math.min(getBattleFieldHeight(),Math.max(0,loc.getY())));
 			
-			turnGunCorrectly(here.degreeTo(temp));
-			fire(power);
-			shotsFired++;
+			//make sure the location recieved is in bounds
+			Location inBounds = new Location(Math.min(getBattleFieldWidth(),Math.max(0,enemyLoc.getX())),Math.min(getBattleFieldHeight(),Math.max(0,enemyLoc.getY())));
 			
-			resume();
-		//}
+			turnGunCorrectly(here.degreeTo(inBounds));
+			super.fire(power);
+	}
+
+	
+	//Whenever this robot sees another robot...
+	public void onScannedRobot(ScannedRobotEvent e) 
+	{
+	    //tell the Environment to send it to the InstanceLog
+	   	Location enemyLoc = env.calculateLoc(e.getBearing(), e.getDistance(), getX(), getY(), getHeading());
+		  env.logEnemy(e, enemyLoc);
+		  
+		  //fire!  (power, predicted enemy location)
+		  fire(2, predictor.getFiringPosition(2, new Location( getX(), getY()), targets.getTarget() ));
 	}
 	
-
+	public void onBulletHit(BulletHitEvent e)
+	{
+	}
+	
+	public void onPaint(Graphics2D g)
+	{
+	   env.paint(g);
+	}
+	
+	public void onHitWall(HitWallEvent e)
+	{
+		System.out.println("Hit Wall!");
+	}
 	
 	//optimize turning for right and left
 	//!!! currently every time the enemy passes over zeemus the gun turns the wrong direction
@@ -164,233 +143,274 @@ public class Zeemus extends AdvancedRobot
 	     else turnGunLeft(dir);
 	    return;
 	}
-  
-	//When scanning a robot, just tell the Environment to send it to the InstanceLog
-	public void onScannedRobot(ScannedRobotEvent e) 
-	{
-		Location loc = env.calculateLoc(e.getBearing(), e.getDistance(), getX(), getY(), getHeading());
-		env.logEnemy(e, loc);
-		aimFire(2, predictor.getFiringPosition(2, new Location( getX(), getY()), env.getTarget() ));
-	}
-	
-	public void onBulletHit(BulletHitEvent e)
-	{
-		shotsHit++;
-	}
-	
-	public void onPaint(Graphics2D g)
-	{
-	   env.paint(g);
-	}
-	
-	public void onHitWall(HitWallEvent e)
-	{
-		System.out.println("Hit Wall!");
-	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class Planner
 {
-
-	//temporary variable to set how far away from enemies is dangerous, should be set by a learning method of some kind
-	//temporarily unused
-	int avoidanceRadius;
-	
+	TargetList targets;
 	Environment env;
-	
-	//an object for anticipating the future movements of robots
 	Predictor predictor;
 	
-	//A LinkedList of integers, each representing a single possible action.
-	LinkedList<Integer> directions;
+	//A Queue of Directions (such as turn right and go back)
+	LinkedList<Direction> directions;
 	
-	public Planner(Environment e, Predictor p)
+	//each direction is repeated in the queue this many times
+	int DIRECTION_REPETITIONS;
+	
+	public Planner(TargetList tl, Environment e, Predictor p)
 	{
-		env = e;
-    	avoidanceRadius = 100;
-    	directions  = new LinkedList<Integer>();
-
-		int dir = getRandomDirection();
-		for(int i=0; i<20; i++)
-			directions.add(dir);
-		predictor = p;
-  	}
+      targets = tl;
+		  env = e;
+    	directions  = new LinkedList<Direction>();
+    	predictor = p;
+    
+    	DIRECTION_REPETITIONS = 20;
+    
+    	//add a random direction to the queue
+		  Direction dir = new Direction(true);
+		  for(int i=0; i<DIRECTION_REPETITIONS; i++)
+		  {
+		  	directions.add(dir);
+		  }	
+  }
   	
-  	public int getNextDirection()
-  	{
-  		return (int)directions.remove();
-  	}
-
-  	public void navigate()
+  //returns whatever direction was last thought to be ok	
+  public Direction getNextDirection()
+  {
+  	return (Direction)directions.remove();
+  }
+  
+  
+  public void navigate()
 	{
-		Target t = env.getTargets().getTarget(0);
+		Target t = targets.getTarget(0);
 		
-		if(directions.size() <= 20)
+		//there always needs to be this many directions in the queue
+		if(directions.size() <= DIRECTION_REPETITIONS)
 		{
-			int dir = getRandomDirection();
-			for(int i=0; i<20; i++)
+			Direction dir = new Direction(true);
+			for(int i=0; i<DIRECTION_REPETITIONS; i++)
 				directions.add(dir);
 		}
 		
-		//check if the next twenty directions will hit something
-		if(checkDirections(20, t.getLastLocation().getX(), t.getLastLocation().getY(), t.getLastInstance().getHeading(), t.getLastInstance().getVelocity(),0) > 0)
+		//check if the next twenty directions will cause the robot to collide with anything
+		if(checkDirections(t.getLastLocation().getX(), t.getLastLocation().getY(), t.getLastInstance().getHeading(), t.getLastInstance().getVelocity()) > 0)
 		{
-			int dir = avoidance(env,t.getLastLocation().getX(), t.getLastLocation().getY(), t.getLastInstance().getHeading(), t.getLastInstance().getVelocity(), 0, 0, 20);			
+		  //if they do, find a set of directions which will not,
+			Direction dir = avoidance(env,t.getLastLocation().getX(), t.getLastLocation().getY(), t.getLastInstance().getHeading(), t.getLastInstance().getVelocity(), 0);			
 		
+		  //remove twenty of the old directions, and add twenty of the new directions
 			for(int i=0; i<20; i++)
 			{
 				directions.remove();
 			}
-			
 			for(int i=0; i<20; i++)
 			{
 				directions.addFirst(dir);
 			}
 		}
+		
+		setRadar();
+		
 	}
 	
+	private void setRadar()
+	{
+      directions.get(0).setRadarRight(360);
+  }
+  
+  private void setTurret()
+  {
+  
+  
+  }
 	
-	//checks the possible directions for obstacles
-	private int avoidance(Environment env, double x, double y, double heading, double velocity, int time, int sum, int n)
+	
+	//checks the possible directions for a clear path
+	private Direction avoidance(Environment env, double x, double y, double heading, double velocity, int time)
 	{
 		int min = 10000000;
-		int minDir = 0;
+		Direction minDir = new Direction();
 		
-		Target t = env.getTargets().getTarget(0);
+		Target t = targets.getTarget(0);
 				
 		for(int i=0; i<9; i++)
 		{
-			int dir = 1;
-			dir+= (i/3) * 10;
-			dir+= (i%3) * 100;
+		  //loop through the possible directions
+		  Direction dir = new Direction();
+		  // i=0,3,6: back      i=1,4,7: stop       i=2,5,8: ahead
+		  dir.setSpeed(((i%3)-1)*100);
+		  // i=0,1,2: left      i=3,4,5: straight       i=6,7,8: right
+		  dir.setTurnRight(((i/3)-1)*100);
 			
-			for(int j=0; j<n; j++)
+			//add the new direction n times
+			for(int j=0; j<DIRECTION_REPETITIONS; j++)
 			{
 				directions.addFirst(dir);
 			}
 			
-			int heat = checkDirections(20, t.getLastLocation().getX(), t.getLastLocation().getY(), t.getLastInstance().getHeading(), t.getLastInstance().getVelocity(),0);
+			//check to see if that direction will result in a collision
+			int heat = checkDirections(t.getLastLocation().getX(), t.getLastLocation().getY(), t.getLastInstance().getHeading(), t.getLastInstance().getVelocity());
 			
-			System.out.println(":"+heat);
-			
+			//look for the a direction with zero (or the lowest) future damage
 			if(heat < min){
 				min = heat;
 				minDir = dir;
 			}		
 			
-			for(int j=0; j<n; j++)
+			//remove what was changed to the direction list
+			for(int j=0; j<DIRECTION_REPETITIONS; j++)
 			{
 				directions.remove();
-			}
-
+			}                 
 		}
-
+		
 		return minDir;
 	}
 
 	
-	//check the next n directions for obstacles
-	private int checkDirections(int n, double x, double y, double heading, double velocity, int t)
+	//check the set of n repeated directions for obstacles
+	private int checkDirections(double x, double y, double heading, double velocity)
 	{		
 		int sum = 0;
 		
-		for(int i=0; i<n; i++){
+		for(int i=0; i<DIRECTION_REPETITIONS; i++){                
+		
+    Direction dir = directions.get(i);
+    	
+    	//simulate turning                          
+		if(dir.getTurnRight() > 0)
+		{
+        	heading += (10 - 	0.75*Math.abs(velocity));	
+    	}
+    	else if(dir.getTurnRight() < 0)
+    	{
+      		heading -= (10 - 0.75*Math.abs(velocity));
+    	}
 			
-			t++;
+    	//ensure heading is both positive and less than 360	
+			heading += 360;
+			heading %= 360;
 			
-			if(directions.get(i) <= 0)
-				return 0;
-			switch(directions.get(i)/100)
-				{
-					
-					//case for start of method
-					case 0:
-						heading -= (10 - 0.75*Math.abs(velocity));
-						break;
-					case 1: 
-						break;
-					case 2:
-						heading += (10 - 0.75*Math.abs(velocity));
-						break;
-					
-				}
-				
-				heading += 360;
-				heading %= 360;
-				
-			switch((directions.get(i)%100)/10)
-				{
-					
-					//case for start of method
-					case 0:
-						velocity = Math.min(8, velocity+1);
-						break;
-					case 1: 
-						if(velocity == 1)
-							velocity =0;
-						else if(velocity > 0 )
-							velocity -= 2;
-						else if(velocity == -1)
-							velocity = 0;
-						else if(velocity < 0 )
-							velocity +=2;
-						break;
-					case 2:
-						velocity = Math.max(-8, velocity - 1);
-						break;
-					
-				}
-				
-				x += Math.sin(Math.toRadians(heading)) * velocity;
-				y += Math.cos(Math.toRadians(heading)) * velocity;
-				
-				x = Math.max(Math.min(x,800),0);
-				y = Math.max(Math.min(y,600),0);
-				
-				sum += env.checkMap(t, x, y);
-			}
+    	//simulate acceleration
+    	if(dir.getSpeed() > 0)
+    	{
+     		velocity = Math.min(8, velocity+1);
+    	}
+    	else if(dir.getSpeed() < 0)
+    	{
+			velocity = Math.max(-8, velocity - 1);
+    	}
+		else
+		{
+        	if(velocity == 1)
+				velocity =0;
+			else if(velocity > 0 )
+				velocity -= 2;
+			else if(velocity == -1)
+				velocity = 0;
+			else if(velocity < 0 )
+				velocity +=2;
+    	}
+			
+    	//simulate movement	
+		x += Math.sin(Math.toRadians(heading)) * velocity;
+		y += Math.cos(Math.toRadians(heading)) * velocity;
+		
+		//check for inBounds
+		x = Math.max(Math.min(x,799),0);
+		y = Math.max(Math.min(y,599),0);
+		
+
+		sum += env.checkMap(i, x, y);	
+		}
 			
 		return sum;		
 			
 	}
 	
+	//reset the map and add values to the dangerous locations
 	public void setupMap()
 	{
-		TargetList targets = env.getTargets();
-			
-		if(!env.getTargets().isEmpty())
+		if(!targets.isEmpty())
 		{
 			for(int t = 0; t < env.getTimescale(); t++)
 			{
-				Location loc = predictor.predictFutureLocation(t, env.getTarget());
+				Location futureLoc = predictor.predictFutureLocation(t, targets.getTarget());
 				Location tloc = new Location(0,0);
-				if(!env.getTargets().isEmpty())
+				if(!targets.isEmpty())
 				{
-					Location current = env.getTargets().getTarget(0).getLastLocation();
-					tloc = predictor.getFiringPosition(2, current, env.getTarget());
+				
+				  //hmm, recheck this
+					Location current = targets.getTarget(0).getLastLocation();
+					tloc = predictor.getFiringPosition(2, current, targets.getTarget());
 				}
-				env.setupMap(t, loc, tloc);
+				env.setupMap(t, futureLoc, tloc);
 				
 			}
 		}
 	}
-	
-	private int getRandomDirection()
-	{
-	    Random rand = robocode.util.Utils.getRandom();
-	    int dir = 1; 					 	//recursive helper dummy direction = 0;
-	    dir += rand.nextInt(2) * 20; 		//either a zero or a two, ahead or back
-	    dir += rand.nextInt(3) * 100; 		//left, straight, or right
-	    return dir;
-	}
-	
-	public Predictor getPredictor()
-	{
-		return predictor;
-	}
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class Direction
+{
+	
+	
+	int speed;
+	int turnRight;
+	int radarRight;
+	int turretRight;
+  
+	public Direction()
+	{
+		speed = 0;
+		turnRight = 0;
+		radarRight = 0;
+		turretRight = 0;
+	}
+	
+	public Direction(boolean t)
+	{
+	    Random rand = robocode.util.Utils.getRandom();
+	    speed = (rand.nextInt(3)-1) * 100;
+	    turnRight = (rand.nextInt(3)-1) * 100;		
+	}
+	  
+	public void setSpeed(int s){
+		speed = s;
+	}
+	  
+	public void setTurnRight(int r){
+		turnRight = r;
+	}
+	  
+	public void setRadarRight(int r){
+		radarRight = r;
+	}
+	  
+	public void setTurretRight(int r){
+		turretRight = r;
+	}
+	       
+	public int getSpeed(){
+		return speed;
+	}
+	
+	public int getTurnRight(){
+		return turnRight;
+	}
+	  
+	public int getRadarRight(){
+		return radarRight;
+	}
+	  
+	public int getTurretRight(){
+		return turretRight;
+	} 
+
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class Predictor
@@ -475,11 +495,11 @@ class Environment
 	//does not imply an ability to correctly predict this far, simply must always be larger than directions.size()
 	int TIMESCALE = 42;
   
-	public Environment(double w, double h, String name)
+	public Environment(double w, double h, TargetList tl)
 	{
 		height = h;
 		width = w;
-		targets = new TargetList(name);
+		targets = tl;
 		hotspots = new int[TIMESCALE][(int)w/GRANULARITY][(int)h/GRANULARITY];	
 			
 		for(int t=0; t<TIMESCALE; t++)
@@ -536,15 +556,6 @@ class Environment
 	   
 		checkedPositions.add(new Location(x,y));
 		return hotspots[t][(int)x/GRANULARITY][(int)y/GRANULARITY];
-	}
-	
-	public TargetList getTargets()
-	{
-		return targets;
-	}
-	
-	public Target getTarget(){
-		return targets.getTarget();
 	}
 		
 	public int getTimescale()
@@ -671,11 +682,6 @@ class TargetList
 	{
 		return tlist.get(i);
 	}
-	
-	public ArrayList<Target> getTargets()
-	{
-		return tlist;
-	}
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -756,7 +762,6 @@ class InstanceLog
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//!! need to update the time for each log
 //container for storing information on scanned robots
 class Instance
 {
@@ -766,6 +771,8 @@ class Instance
 	private double velocity;
 	private long time;
 	private Location loc;
+	private double radar;
+	private double turret;
 		
 	public Instance(ScannedRobotEvent e , Location l)
 	{
@@ -775,17 +782,21 @@ class Instance
 		velocity = e.getVelocity();
 		time = e.getTime();
 		loc = l;
+		radar = 0;
+		turret = 0;
 				
 	}
 	
-	public Instance(long t, double e, double h, double v,Location l)
+	public Instance(long t, double e, double h, double v, double r, double tur, Location l)
 	{
 		time = t;
 		heading = h;
 		energy = e;
 		velocity = v;
 		loc = l;
-		distance = 0;		
+		distance = 0;
+    radar = r;
+    turret = tur;		
 	}
 	
 	public  double getHeading(){
@@ -944,7 +955,10 @@ class Location
 	
 	
 			
-			
+	/////////////////////////////////////////////////////////////Correct Turning/////////
+  
+
+  		
 			
 			
 
