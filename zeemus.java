@@ -32,7 +32,7 @@ public class Zeemus extends AdvancedRobot
 		while(true)
 		{
 			//log yourself.  This robot will always occupy targets.get(0);
-			env.logSelf(getTime(), getEnergy(), getHeading(), getVelocity(), getRadar(), getTurret(), new Location(getX(), getY()));
+			targets.logSelf(getTime(), getEnergy(), getHeading(), getVelocity(), getRadarHeading(), getGunHeading(), new Location(getX(), getY()));
 			
 			//reset the map of dangerous locations
 			plan.setupMap();
@@ -43,6 +43,9 @@ public class Zeemus extends AdvancedRobot
 			//get the next direction and set it for the next call to execute
 			Direction dir = plan.getNextDirection();
 			setDirection(dir);
+			
+			//search the radar arc for an enemy
+			scan();
 			
 			//execute directions which have been set
 			execute();
@@ -95,7 +98,7 @@ public class Zeemus extends AdvancedRobot
 	{
 	    //tell the Environment to send it to the InstanceLog
 	   	Location enemyLoc = env.calculateLoc(e.getBearing(), e.getDistance(), getX(), getY(), getHeading());
-		  env.logEnemy(e, enemyLoc);
+		  targets.logInstance(e, enemyLoc);
 		  
 		  //fire!  (power, predicted enemy location)
 		  fire(2, predictor.getFiringPosition(2, new Location( getX(), getY()), targets.getTarget() ));
@@ -139,8 +142,8 @@ public class Zeemus extends AdvancedRobot
 	    	
 	    }
 	    if(right)
-	      turnGunRight(dir);
-	     else turnGunLeft(dir);
+	      setTurnGunRight(dir);
+	     else setTurnGunLeft(dir);
 	    return;
 	}
 }
@@ -217,7 +220,32 @@ class Planner
 	
 	private void setRadar()
 	{
-      directions.get(0).setRadarRight(360);
+	    //move out of method to use as another variable for genetic algorithm optimization
+	    double RADAR_SLIP_COMPENSATION = .2;
+	
+	    if(targets.isEmpty())
+	    {
+          directions.get(0).setRadarRight(360);
+      }
+	    
+	    else
+      {
+          int timeSinceLastScan = (int) (targets.getTarget(0).getLastInstance().getTime() - targets.getTarget().getLastInstance().getTime());
+           
+    	    Location currentLoc = targets.getTarget(0).getLastLocation();
+    	    //predict where they should be in one timestep from now
+          Location predictedTargetLoc = predictor.predictFutureLocation(timeSinceLastScan + 1, targets.getTarget());
+          
+          double radar = targets.getTarget(0).getLastInstance().getRaderHeading();
+          double neededRadar = currentLoc.degreeTo(predictedTargetLoc);
+          double changeInRadar = neededRadar - radar;
+          
+          //when a significant amount of time has elapsed since last scan, turn past the area where you think you need to
+          changeInRadar *= (1+ timeSinceLastScan * RADAR_SLIP_COMPENSATION);
+          //generates an occilatory responce when robot cannot find enemy (too far past predicted, then too far in the opposite direction)
+          
+          directions.get(0).setRadarRight((int)changeInRadar);
+      }
   }
   
   private void setTurret()
@@ -237,6 +265,7 @@ class Planner
 				
 		for(int i=0; i<9; i++)
 		{
+		  
 		  //loop through the possible directions
 		  Direction dir = new Direction();
 		  // i=0,3,6: back      i=1,4,7: stop       i=2,5,8: ahead
@@ -339,13 +368,11 @@ class Planner
 			{
 				Location futureLoc = predictor.predictFutureLocation(t, targets.getTarget());
 				Location tloc = new Location(0,0);
-				if(!targets.isEmpty())
-				{
 				
 				  //hmm, recheck this
 					Location current = targets.getTarget(0).getLastLocation();
 					tloc = predictor.getFiringPosition(2, current, targets.getTarget());
-				}
+					
 				env.setupMap(t, futureLoc, tloc);
 				
 			}
@@ -371,10 +398,12 @@ class Direction
 		turretRight = 0;
 	}
 	
+	//creates a random direction
 	public Direction(boolean t)
 	{
 	    Random rand = robocode.util.Utils.getRandom();
-	    speed = (rand.nextInt(3)-1) * 100;
+	    // either forward or backward
+	    speed = (rand.nextInt(2)*-2 + 1) * 100;
 	    turnRight = (rand.nextInt(3)-1) * 100;		
 	}
 	  
@@ -538,16 +567,6 @@ class Environment
 		hotspots[t][(int)loc.getX()/GRANULARITY][(int)loc.getY()/GRANULARITY] += 1;
 	}
 	
-	public void logEnemy(ScannedRobotEvent e, Location loc)
-	{
-		targets.logInstance(e, loc);
-	}
-	
-	public void logSelf(long time, double energy, double heading, double velocity, Location loc)
-	{
-		targets.logSelf(time, energy, heading, velocity, loc);
-	}
-	
 	public int checkMap(int t, double x, double y)
 	{
 	
@@ -665,9 +684,9 @@ class TargetList
 		}
 	}
 
-	public void logSelf(long time, double energy, double heading, double velocity, Location loc)
+	public void logSelf(long time, double energy, double heading, double velocity, double radar, double turret, Location loc)
 	{
-		tlist.get(0).logSelf(time, energy, heading, velocity, loc);
+		tlist.get(0).logSelf(time, energy, heading, velocity, radar, turret, loc);
 	}		
 				
 	//return the first target seen for now
@@ -701,9 +720,9 @@ class Target
 		ilog.logInstance(e, loc);
 	}
 	
-	public void logSelf(long time, double energy, double heading, double velocity, Location loc)
+	public void logSelf(long time, double energy, double heading, double velocity, double radar, double turret, Location loc)
 	{
-		ilog.logSelf(time, energy, heading, velocity, loc);
+		ilog.logSelf(time, energy, heading, velocity, radar, turret, loc);
 	}
 	
 	public String getName()
@@ -740,9 +759,9 @@ class InstanceLog
 		log.add(new Instance(e, loc));		
 	}
 	
-	public void logSelf(long time, double energy, double heading, double velocity, Location loc)
+	public void logSelf(long time, double energy, double heading, double velocity, double radar, double turret, Location loc)
 	{
-		log.add(new Instance(time, energy, heading, velocity, loc));
+		log.add(new Instance(time, energy, heading, velocity, radar, turret, loc));
 	}
 	
 	public Instance getLastInstance(){
@@ -817,6 +836,12 @@ class Instance
 	public long getTime(){
 		return time;
 	}
+	public double getRaderHeading(){
+    return radar;
+  }
+  public double getGunHeading(){
+    return turret;
+  }
 	
 }
 
