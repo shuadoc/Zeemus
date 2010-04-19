@@ -21,19 +21,23 @@ public class Zeemus extends AdvancedRobot
 		
 	public void run() 
 	{
-	  
-		if(!initialized)
-		{
-		  initialize();
-		  initialized = true;
-		}
+	    targets = new TargetList(getName());
+	     
+		  env = new Environment(getBattleFieldWidth(), getBattleFieldHeight(), targets);
+			
+		  predictor = new Predictor(env);
+				
+		  plan  = new Planner(targets, env, predictor);
+	      
+	    //Make the gun and radar turn independently
+		  setAdjustRadarForGunTurn(true);
+		  setAdjustGunForRobotTurn(true); 
 		
+
 		while(true)
 		{
 			//log yourself.  This robot will always occupy targets.get(0);
 			targets.logSelf(getTime(), getEnergy(), getHeading(), getVelocity(), getRadarHeading(), getGunHeading(), new Location(getX(), getY()));
-			
-			System.out.println("time: " + getTime());
 			
 			//check the planned directions for obstacles, make changes as needed
 			plan.navigate();
@@ -46,47 +50,20 @@ public class Zeemus extends AdvancedRobot
 			//scan();
 			
 			//execute set directions
-			//execute();
-			turnRadarRight(1);
+			execute();
+			
+			if(getTime() % 10 == 0)
+		    super.fire(3);
 	
 		}
-	}
-	
-	public void initialize()
-	{
-		targets = new TargetList(getName());
-	     
-		env = new Environment(getBattleFieldWidth(), getBattleFieldHeight(), targets);
-			
-		predictor = new Predictor(env);
-				
-		plan  = new Planner(targets, env, predictor);
-	      
-	  //Make the gun and radar turn independently
-		setAdjustRadarForGunTurn(true);
-		setAdjustGunForRobotTurn(true); 
-			
-  }
-	
+	}	
 	
 	public void setDirection(Direction dir)
 	{ 
-    if(dir.getGunRight() > 0)
-      setTurnGunRight(Math.min(dir.getGunRight(), 20 ));
-    else 
-      setTurnGunRight(Math.max(dir.getGunRight(), -20 ));
-    if(dir.getGunRight() > 0)
-      setTurnRadarRight(Math.min(dir.getRadarRight(), 45));
-	  else
-	    setTurnRadarRight(Math.max(dir.getRadarRight(), -45));
-	  if(dir.getTurnRight() > 0)
-      setTurnRight(Math.min(dir.getTurnRight(), (10 - .75 * getVelocity())));
-	  else
-	    setTurnRight(Math.min(dir.getTurnRight(), (10 - .75 * getVelocity())));
-	  if(dir.getSpeed() > 0)
-	    setAhead(Math.min(dir.getSpeed(), 8));
-	  else
-	    setAhead(Math.max(dir.getSpeed(), -8));
+      setTurnGunRight(dir.getGunRight());
+	    setTurnRadarRight(dir.getRadarRight());
+	    setTurnRight(dir.getTurnRight());
+	    setAhead(dir.getSpeed());
 	}
 
 	
@@ -97,22 +74,18 @@ public class Zeemus extends AdvancedRobot
 			
 		//make sure the location recieved is in bounds
 		Location inBounds = new Location(Math.min(getBattleFieldWidth(),Math.max(0,enemyLoc.getX())),Math.min(getBattleFieldHeight(),Math.max(0,enemyLoc.getY())));
-			
-		turnGunCorrectly(here.degreeTo(inBounds));
+    
+    //deleted turnGunCorrectly method
+    
 		super.fire(power);
 	}
 
 	
-	//Whenever this robot sees another robot...
+	//Whenever this robot sees another robot log their information
 	public void onScannedRobot(ScannedRobotEvent e) 
 	{
-			
-	    //Log his position
 	   	Location enemyLoc = env.calculateLoc(e.getBearing(), e.getDistance(), getX(), getY(), getHeading());
-		targets.logInstance(e, enemyLoc);
-		  
-		//fire(power, predicted enemy location)
-		fire(2, predictor.getFiringPosition(2, new Location( getX(), getY()), targets.getTarget() ));
+		  targets.logInstance(e, enemyLoc);
 	}
 	
 	public void onBulletHit(BulletHitEvent e)
@@ -128,36 +101,9 @@ public class Zeemus extends AdvancedRobot
 	{
 		System.out.println("Hit Wall!");
 	}
-	
-	//optimize turning for right and left
-	//!!! currently every time the enemy passes over zeemus the gun turns the wrong direction
-	public void turnGunCorrectly(double dir)
-  	{
-	    //make sure the number is not greather than 360
-	    robocode.util.Utils.normalAbsoluteAngleDegrees(dir);
-	    
-	    //dir is now how far to turn right
-	    dir -= getGunHeading(); 
-	    
-	    //optimize turning right and left
-	    boolean right = true;
-	    if(dir < 0)
-	    {
-	    	dir *= (-1);
-	    	right = !right;
-	    }
-	    else if(dir > 180)
-	    {
-	    	dir -= 180;
-	    	right = !right;
-	    	
-	    }
-	    if(right)
-	      setTurnGunRight(dir);
-	     else setTurnGunLeft(dir);
-	    return;
-	}
 }
+	
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class Planner
@@ -175,7 +121,7 @@ class Planner
 	public Planner(TargetList tl, Environment e, Predictor p)
 	{
     	targets = tl;
-		env = e;
+		  env = e;
     	directions  = new LinkedList<Direction>();
     	predictor = p;
     
@@ -220,9 +166,9 @@ class Planner
 	
 	private void setRadar()
 	{
-	    //move out of method to use as another variable for genetic algorithm optimization
+	    //can be used for genetic algorithm optimization
 	    double RADAR_SLIP_COMPENSATION = 1.2;
-	    int TIME_TILL_REACQUIRE = 3;
+	    int TIME_TILL_REACQUIRE = 5;
 	
 	    if(targets.isEmpty())
 	    {
@@ -234,12 +180,12 @@ class Planner
 	        int timeSinceLastScan = (int) (targets.getSelf().getLastInstance().getTime() - targets.getTarget().getLastInstance().getTime());
 	        
 	        //anticipate where this robot will be next timestep   
-	    	Location simulatedFutureLoc = simulateDirection(targets.getSelf().getLastInstance(), directions.get(0)).getLocation();
-	    	//predict where they should be next timestep
+	    	  Location futureLoc = simulateDirection(targets.getSelf().getLastInstance(), directions.get(0)).getLocation();
+	    	  //predict where they should be next timestep
 	        Location predictedTargetLoc = predictor.predictFutureLocation(timeSinceLastScan + 1, targets.getTarget());
 	          
 	        double currentRadar = targets.getSelf().getLastInstance().getRadarHeading();
-	        double neededRadar = simulatedFutureLoc.degreeTo(predictedTargetLoc);
+	        double neededRadar = futureLoc.degreeTo(predictedTargetLoc);
 	        double changeInRadar = neededRadar - currentRadar;
 	        
 	        if(changeInRadar < -180)
@@ -249,11 +195,10 @@ class Planner
 	        
 	        //when a small amount of time has elapsed since last scan, turn past the area where you think you need to
 	        changeInRadar *= Math.pow(RADAR_SLIP_COMPENSATION, timeSinceLastScan-1);
+	        
 	        //when a significat amount of time has elapsed, re-acquire.
 	        if(timeSinceLastScan > TIME_TILL_REACQUIRE)
 	        	changeInRadar = 360;
-	        	
-	        System.out.println(changeInRadar + ", time: " + targets.getSelf().getLastInstance().getTime());
 	          
 	        directions.get(0).setRadarRight((int)changeInRadar);
     	}
@@ -261,8 +206,25 @@ class Planner
   
 	private void setGun()
 	{
-  
-  
+	   if(!targets.isEmpty())
+	   {
+         //anticipate where this robot will be next timestep   
+	    	 Location futureLoc = simulateDirection(targets.getSelf().getLastInstance(), directions.get(0)).getLocation();
+	    	 //anticipate where the enemy will be after a bullet travels to their position
+         Location targetingLoc = predictor.getFiringPosition(3, futureLoc, targets.getTarget());
+         
+         double currentGun = targets.getSelf().getLastInstance().getGunHeading();
+         double neededGun = futureLoc.degreeTo(targetingLoc);
+         double changeInGun = neededGun - currentGun;
+         
+         if(changeInGun < -180)
+		        changeInGun += 360;
+		     if(changeInGun > 180)
+		    	  changeInGun -= 360;
+     
+         directions.get(0).setGunRight((int)changeInGun);
+     
+     }
 	}
 	
 	
