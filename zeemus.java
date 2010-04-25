@@ -43,7 +43,7 @@ public class Zeemus extends AdvancedRobot
 			Direction dir = plan.getNextDirection();
 			setDirection(dir);
 			
-			debug();
+			//debug();
 			
 			//execute set directions
 			execute();
@@ -56,22 +56,10 @@ public class Zeemus extends AdvancedRobot
 	
 	public void setDirection(Direction dir)
 	{ 
-	    if(dir.getGunRight() >= 0)
-            setTurnGunRight(dir.getGunRight());
-        else 
-            setTurnGunLeft(dir.getGunRight() * -1);
-        if(dir.getRadarRight() >= 0)
-            setTurnRadarRight(dir.getRadarRight());
-        else 
-            setTurnRadarLeft(dir.getRadarRight() * -1);
-        if(dir.getTurnRight() >= 0)
-            setTurnRight(dir.getTurnRight());
-        else 
-            setTurnLeft(dir.getTurnRight() * -1);
-        if(dir.getSpeed() >= 0)
-            setAhead(dir.getSpeed());
-        else 
-            setAhead(dir.getSpeed() * -1);
+        setTurnGunRight(dir.getGunRight());
+        setAhead(dir.getSpeed());
+		setTurnRight(dir.getTurnRight());
+		setTurnRadarRight(dir.getRadarRight());
 	}
 
 	
@@ -80,6 +68,7 @@ public class Zeemus extends AdvancedRobot
 	{
 	   	Location enemyLoc = env.calculateLoc(e.getBearing(), e.getDistance(), getX(), getY(), getHeading());
 		targets.logInstance(e, enemyLoc);
+		System.out.println("Scanned at: " + getTime());
 	}
 	
 	public void onPaint(Graphics2D g)
@@ -130,6 +119,8 @@ class Planner
 	
 	//each direction is repeated in the queue this many times
 	int DIRECTION_REPETITIONS;
+	//avoidance replaces this many directions at a time
+	int AVOIDANCE_REPETITIONS;
 	
 	public Planner(TargetList tl, Environment e, Predictor p)
 	{
@@ -158,6 +149,12 @@ class Planner
   		//there always needs to be this many directions in the queue
 		if(directions.size() <= DIRECTION_REPETITIONS)
 			repeatedAdd(new Direction(true));
+  	}
+  	
+  	public void repeatedAddFirst(Direction dir)
+  	{
+  		for(int i=0; i<DIRECTION_REPETITIONS; i++)
+			directions.addFirst(dir);
   	}
   	
   	public void repeatedAdd(Direction dir)
@@ -249,10 +246,11 @@ class Planner
 	
 	//adjusts planned movement for obstacle avoidance
 	private void avoidObstacles()
-	{		
+	{
+        		
 		//check if the next n directions will cause the robot to collide with anything
 		if(checkDirections() > 0)
-		{		
+		{
 			
 			int min = 10000000;
 			Direction minDir = new Direction(true);
@@ -266,24 +264,32 @@ class Planner
                 {
 				    case(0):dir.setSpeed(100);
 				            dir.setTurnRight(100);
+				            break;
 				    case(1):dir.setSpeed(100);
 				            dir.setTurnRight(-100);
+				            break;
 				    case(2):dir.setSpeed(100);
 				            dir.setTurnRight(0);
+				            break;
 				    case(3):dir.setSpeed(-100);
 				            dir.setTurnRight(100);
+				            break;
 				    case(4):dir.setSpeed(-100);
 				            dir.setTurnRight(-100);
+				            break;
 				    case(5):dir.setSpeed(-100);
 				            dir.setTurnRight(0);
+				            break;
 				    case(6):dir.setSpeed(0);
 				            dir.setTurnRight(100);
+				            break;
 				    case(7):dir.setSpeed(0);
 				            dir.setTurnRight(-100);
+				            break;
 				}
 				
 				//append the direction to be checked to the beginning of the list
-				repeatedAdd(dir);
+				repeatedAddFirst(dir);
 				
 				//check to see if the added direction will result in a collision
 				int heat = checkDirections();
@@ -292,7 +298,8 @@ class Planner
 				if(heat < min){
 					min = heat;
 					minDir = dir;
-				}		
+				}
+                		
 				
 				//return the direction list to its original state
 				repeatedRemove();                
@@ -300,7 +307,7 @@ class Planner
 			
 			//remove the directions which hit obstacles and add the direction with a clear path
 			repeatedRemove();
-			repeatedAdd(minDir);
+			repeatedAddFirst(minDir);
 		}
 	}
 
@@ -747,23 +754,26 @@ class TargetList
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class Target
 {
-	private InstanceLog ilog;
-	private String name;
+    private String name;
+	private LinkedList<Instance> ilog;
 	
 	public Target(String n)
 	{
 		name = n;
-		ilog = new InstanceLog();
+		ilog = new LinkedList<Instance>();
 	}
 	
 	public void logEnemy(ScannedRobotEvent e, Location loc)
 	{
-		ilog.logInstance(e, loc);
+	    Instance temp = new Instance(e, loc);
+        ilog.add(temp);
+		
 	}
 	
 	public void logSelf(long time, double energy, double heading, double velocity, double radar, double gun, Location loc)
 	{
-		ilog.logSelf(time, energy, heading, velocity, radar, gun, loc);
+		Instance temp = new Instance(time, energy, heading, velocity, radar, gun, loc);
+		ilog.add(temp);
 	}
 	
 	public String getName()
@@ -773,51 +783,20 @@ class Target
 	
 	public Instance getLastInstance()
 	{
-		return ilog.getLastInstance();
+		return ilog.get(ilog.size()-1);
 	}
 	
 	public Location getLastLocation()
 	{
-		return ilog.getLastInstance().getLocation();
-	}
-}
-
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//Manages a list of events for each robot
-class InstanceLog
-{
-	private  ArrayList<Instance> log;
-	
-	public InstanceLog()
-	{
-		log = new ArrayList<Instance>();
-	}
-
-	
-	public void logInstance(ScannedRobotEvent e, Location loc)
-	{
-		log.add(new Instance(e, loc));		
-	}
-	
-	public void logSelf(long time, double energy, double heading, double velocity, double radar, double gun, Location loc)
-	{
-		log.add(new Instance(time, energy, heading, velocity, radar, gun, loc));
-	}
-	
-	public Instance getLastInstance(){
-		return log.get(log.size()-1);
-	}
-	
-	public Instance getInstance(int i)
-	{
-		return log.get(i);
+		return getLastInstance().getLocation();
 	}
 	
 	public boolean isEmpty()
 	{
-		return log.size()<1;
+	    return ilog.size() < 1;
 	}
+	
+
 }
 
 
@@ -934,6 +913,34 @@ class Location
 	
 }
 
+class MarkovNode
+{
+    private ArrayList<Connection> outgoing;
+    private ArrayList<Connection> incoming;
+    
+    public MarkovNode(){}
+    
+    public void visitNode(Instance i)
+    {
+       
+    
+    }
+
+}
+
+class Connection
+{
+    public MarkovNode origin;
+    public MarkovNode destination;
+    
+    
+
+    public Connection(){}
+
+}
+
+
+
 	
                      /********* Code snippets
 
@@ -1035,10 +1042,27 @@ class Location
 	
 	
 			
-	/////////////////////////////////////////////////////////////Correct Turning/////////
+	////////////////////////////////////////////////////////////Debug class/////////
   
 
-  		
+public class Debug
+{
+    boolean debugOn;
+
+    public Debug()
+    {debugOn = false;}
+    
+    public debugOn()
+    {
+        debugOn = true;
+    }
+    
+    public debugOff()
+    {
+        debugOn = false;
+    }
+
+}  		
 			
 			
 
