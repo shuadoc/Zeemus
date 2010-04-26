@@ -68,7 +68,6 @@ public class Zeemus extends AdvancedRobot
 	{
 	   	Location enemyLoc = env.calculateLoc(e.getBearing(), e.getDistance(), getX(), getY(), getHeading());
 		targets.logInstance(e, enemyLoc);
-		System.out.println("Scanned at: " + getTime());
 	}
 	
 	public void onPaint(Graphics2D g)
@@ -756,17 +755,21 @@ class Target
 {
     private String name;
 	private LinkedList<Instance> ilog;
+	private HashMap<MarkovNode, ArrayList<Connection>> chain;
 	
 	public Target(String n)
 	{
 		name = n;
 		ilog = new LinkedList<Instance>();
+		chain = new HashMap<MarkovNode, ArrayList<Connection>>();
 	}
 	
 	public void logEnemy(ScannedRobotEvent e, Location loc)
-	{
-	    Instance temp = new Instance(e, loc);
-        ilog.add(temp);
+	{   
+	    Instance last = getLastInstance();
+        double angularMomentum = e.getHeading() - last.getHeading();
+	    Instance newI = new Instance(e, loc, angularMomentum);
+        ilog.add(newI);
 		
 	}
 	
@@ -805,6 +808,7 @@ class Target
 class Instance
 {
 	private double heading;
+	private double angularMomentum;
 	private double energy;
 	private double distance;
 	private double velocity;
@@ -813,9 +817,10 @@ class Instance
 	private long time;
 	private Location loc;
 		
-	public Instance(ScannedRobotEvent e , Location l)
+	public Instance(ScannedRobotEvent e , Location l, double aM)
 	{
 		heading = e.getHeading();
+		angularMomentum = aM;
 		energy = e.getEnergy();
 		distance = e.getDistance();
 		velocity = e.getVelocity();
@@ -834,6 +839,7 @@ class Instance
 		velocity = v;
 		loc = l;
 		distance = 0;
+		angularMomentum = 0;
    		radar = r;
     	gun = g;		
 	}
@@ -861,6 +867,9 @@ class Instance
 	}
 	public double getGunHeading(){
 		return gun;
+	}
+	public double getAngularMomentum(){
+	   return angularMomentum;
 	}
   
 	public String toString()
@@ -913,17 +922,35 @@ class Location
 	
 }
 
-class MarkovNode
+class MarkovNode implements Comparable
 {
-    private ArrayList<Connection> outgoing;
-    private ArrayList<Connection> incoming;
+    public ArrayList<Connection> outgoing;
+    public ArrayList<Connection> incoming;
+
+    public double angularMomentum;
+    public int velocity;
     
-    public MarkovNode(){}
+    public int visitCount;
     
-    public void visitNode(Instance i)
+    public MarkovNode(int h, double am)
     {
-       
+
+        //make angularMomentum be a multiple of .25
+        angularMomentum = Math.rint(am*4) / 4;
+        velocity = v;
+        
+        visitCount = 0;
+        
+        outgoing = new ArrayList<Connection>();
+        incoming = new ArrayList<Connection>();    
+    }
     
+    public int compareTo(Object mn)
+    {
+        vDiff = velocity-((MarkovNode)mn).velocity
+        if(vDiff == 0)
+            return (int)(angularMomentum - ((MarkovNode)mn).angularMomentum);
+        return vDiff;
     }
 
 }
@@ -1003,7 +1030,7 @@ class Connection
 	}
 	
 
-	////////////////////////////////////////
+	//////////////////////////////////////// 
 	
 	
 		
