@@ -68,6 +68,7 @@ public class Zeemus extends AdvancedRobot
 	{
 	   	Location enemyLoc = env.calculateLoc(e.getBearing(), e.getDistance(), getX(), getY(), getHeading());
 		targets.logInstance(e, enemyLoc);
+		
 	}
 	
 	public void onPaint(Graphics2D g)
@@ -503,11 +504,11 @@ class Predictor
 	//estimate where they will be when the bullet arrives
 	public  Location getFiringPosition(int power , Location current, Target t)
 	{
-		return gfpHelper(current, power, t.getLastInstance().getVelocity(), t.getLastInstance().getHeading(), 0, t.getLastLocation(), 4);	
+		return linearHelper(current, power, t.getLastInstance().getVelocity(), t.getLastInstance().getHeading(), 0, t.getLastLocation(), 4);	
 	}
 	
 	//Helper method uses recursion to approximate future location
-	private Location gfpHelper(Location current, double power, double velocity, double heading, double priorDistance, Location loc, int recurseNum)
+	private Location linearHelper(Location current, double power, double velocity, double heading, double priorDistance, Location loc, int recurseNum)
 	{
 		//check if this is the last recurse
 		if(recurseNum <= 0)
@@ -521,13 +522,44 @@ class Predictor
 		double time = distance / (20 - power*3);
 		
 		//where will the enemy be after that amount of time has elapsed
-		Location update = predictFutureLocation(loc, velocity, time, heading);
+		Location update = predictFutureLocationLinear(loc, velocity, time, heading);
 		
-		return gfpHelper(current, power, velocity, heading, distance+priorDistance, update, recurseNum-1);
+		return linearHelper(current, power, velocity, heading, distance+priorDistance, update, recurseNum-1);
 		
 	}
 	
-	public Location predictFutureLocation(Location loc, double velocity, double time, double heading)
+	private Instance recurseMarkov(Target t)
+	{
+	    MarkovMap map = t.mmap;
+	    ArrayList<Connection> connections = map.get(t.getLastInstance());
+	    
+	    //find out how many times it has been in this state
+	    int total = 0;
+        for(int i=0; i<connections.size(); i++)
+        {
+            total += connections.get(i).size();        
+        }
+        
+        //find the highest probability for the next state
+        double[] probabilites = new double[connections.size()];
+        double max = 0;
+        Connection maxConn = connections.get(0);
+        
+        for(int i=0; i<probabilites.length; i++)
+        { 
+            probabilites[i] = 1.0 * connections.get(i).size() / total;
+            
+            if(probabilites[i] > max)
+            {
+                max = probabilites[i];
+                maxConn = connections.get(i);
+            }
+        }
+        
+        return maxConn.destinations.get(0);
+	}
+	
+	public Location predictFutureLocationLinear(Location loc, double velocity, double time, double heading)
 	{
 		double x = loc.getX() + velocity * time * (Math.sin(Math.toRadians(heading)));
 		double y = loc.getY() + velocity * time * (Math.cos(Math.toRadians(heading)));
@@ -541,7 +573,7 @@ class Predictor
 	
 	public Location predictFutureLocation(int time, Target t)
 	{
-		return predictFutureLocation(t.getLastLocation(), t.getLastInstance().getVelocity(), (double)time, t.getLastInstance().getHeading());
+		return predictFutureLocationLinear(t.getLastLocation(), t.getLastInstance().getVelocity(), (double)time, t.getLastInstance().getHeading());
 	}
 	
 	
@@ -755,21 +787,35 @@ class Target
 {
     private String name;
 	private LinkedList<Instance> ilog;
-	private HashMap<MarkovNode, ArrayList<Connection>> chain;
+    public MarkovMap mmap;
 	
 	public Target(String n)
 	{
 		name = n;
 		ilog = new LinkedList<Instance>();
-		chain = new HashMap<MarkovNode, ArrayList<Connection>>();
+        mmap = new MarkovMap();
 	}
 	
 	public void logEnemy(ScannedRobotEvent e, Location loc)
 	{   
-	    Instance last = getLastInstance();
-        double angularMomentum = e.getHeading() - last.getHeading();
-	    Instance newI = new Instance(e, loc, angularMomentum);
-        ilog.add(newI);
+	    //log the robot in the Instance Log
+	    double angularMomentum = 0;
+	    if(ilog.size() >1)
+	    {
+	        Instance last = getLastInstance();
+            angularMomentum = e.getHeading() - last.getHeading();
+	    }
+	    
+        ilog.add(new Instance(e, loc, angularMomentum));
+        
+        //log the robot in the markov chain
+        if(ilog.size() > 2)
+        {
+            mmap.put(getInstanceBeforeLast(), getLastInstance());
+            
+            System.out.println("total states: " + mmap.map.size());
+            System.out.println(mmap.get(getInstanceBeforeLast()).get(0));
+        }
 		
 	}
 	
@@ -787,6 +833,11 @@ class Target
 	public Instance getLastInstance()
 	{
 		return ilog.get(ilog.size()-1);
+	}
+	
+	public Instance getInstanceBeforeLast()
+	{
+	    return ilog.get(ilog.size() - 2);
 	}
 	
 	public Location getLastLocation()
@@ -885,6 +936,29 @@ class Instance
 		"y: " + loc.getY() + "\n" +
 		"-" + "\n";
 	}
+ /*	
+	//if this = 4, angular momentum is regarded in intervals of .25
+    int RECIPROCOL_GRANULARITY_AM = 4;
+     
+    public boolean equals(Instance i)
+    {
+        int vDiff = (int)(velocity -i.velocity);
+        if(vDiff == 0)
+        {
+            return ((int)(angularMomentum * RECIPROCOL_GRANULARITY_AM) ==  (int)(i.angularMomentum * RECIPROCOL_GRANULARITY_AM) );
+        }
+        return false;
+    }
+    
+    
+   public int hashCode()
+    {
+        return ((int)velocity) +  (((int)(angularMomentum * RECIPROCOL_GRANULARITY_AM)) * 10);
+    }    */
+    
+    public int hashCode() { return 1; }
+    
+    public boolean equals(Instance i){return true;}
 	
 }
 
@@ -922,47 +996,122 @@ class Location
 	
 }
 
-class MarkovNode implements Comparable
+
+class MarkovMap
 {
-    public ArrayList<Connection> outgoing;
-    public ArrayList<Connection> incoming;
+	public HashMap<Instance, ArrayList<Connection>> map; 
 
-    public double angularMomentum;
-    public int velocity;
-    
-    public int visitCount;
-    
-    public MarkovNode(int h, double am)
+    public MarkovMap()
     {
-
-        //make angularMomentum be a multiple of .25
-        angularMomentum = Math.rint(am*4) / 4;
-        velocity = v;
-        
-        visitCount = 0;
-        
-        outgoing = new ArrayList<Connection>();
-        incoming = new ArrayList<Connection>();    
+		map = new HashMap<Instance, ArrayList<Connection>>();
     }
     
-    public int compareTo(Object mn)
+    public ArrayList<Connection> get(Instance key)
     {
-        vDiff = velocity-((MarkovNode)mn).velocity
-        if(vDiff == 0)
-            return (int)(angularMomentum - ((MarkovNode)mn).angularMomentum);
-        return vDiff;
+        return map.get(key);
+    }
+    
+    //updates the MarkovModel to include or increment this connection 
+    public void put(Instance origin, Instance destination)
+    {
+        
+        Connection newConn = new Connection(origin, destination);
+        ArrayList<Connection> connections = new ArrayList<Connection>();
+        
+        System.out.println("-----------\n" + map.containsKey(origin));
+        System.out.println(origin.hashCode());
+        
+        //if the robot has already been seen in this state
+        if(map.containsKey(origin))
+        {
+            connections = map.get(origin);
+            int index = connections.indexOf(newConn);
+        
+            //if this connection already exists
+            if(index != -1)
+            {
+                //add this occourance of the connection
+                connections.get(index).add(newConn);    
+            }
+            
+            //otherwise add a new connection
+            else
+            {
+                connections.add(newConn);
+            }
+        }
+        
+        //if this is a new state for the robot
+        else
+        {
+            connections.add(newConn);
+            map.put(origin, connections);
+        }
+    
     }
 
 }
 
+// A connection is a change from one state to another
+//i.e. moving from v=0 to v=1;
 class Connection
 {
-    public MarkovNode origin;
-    public MarkovNode destination;
+    //each connection remembers the entire state of the robot each time 
+    //it's velocity was this and it's angularMomentum was this
+    public ArrayList<Instance> origins;
+    //the state of the robot after the change
+    public ArrayList<Instance> destinations;
     
     
 
-    public Connection(){}
+    public Connection(Instance o, Instance d)
+    {
+        origins = new ArrayList<Instance>();
+        origins.add(o);
+        destinations = new ArrayList<Instance>();
+        destinations.add(d);
+    }
+    
+    public boolean equals(Connection c)
+    {
+        //compare the two instances which are included in this connection
+        return (origins.get(0).equals(c.origins.get(0))) && (destinations.get(0).equals(c.destinations.get(0)));
+    }
+    
+    public int hashCode()
+    {
+        return origins.get(0).hashCode() ^ destinations.get(0).hashCode();
+    }
+
+    
+    public void add(Connection c)
+    {
+        origins.add(c.origins.get(0));
+        destinations.add(c.destinations.get(0));
+    }
+    
+    public int size()
+    {
+        return origins.size();
+    }
+    
+    public String toString()
+    {
+        return 
+        "Connection-------" +
+        "\norigins: " + size() +
+        "\n origin[0]:" +
+        "\n velocity: "+
+        origins.get(0).getVelocity() +
+        "\n angularMomentum: "+
+        origins.get(0).getAngularMomentum() +
+        "\ndestination[0]:" +
+        "\n velocity: "+
+        destinations.get(0).getVelocity() +
+        "\n angularMomentum: "+
+        destinations.get(0).getAngularMomentum() +
+        "\n" ;
+    }
 
 }
 
@@ -1091,7 +1240,31 @@ public class Debug
 
 }  		
 			
-			
+////////////////////////////////////////////////////////////////////////////////
+
+class MarkovNode implements Comparable
+{
+    public ArrayList<Connection> outgoing;
+    public ArrayList<Connection> incoming;
+
+    public double angularMomentum;
+    public int velocity;
+    
+    public int visitCount;
+    
+    public MarkovNode(int h, double am)
+    {
+
+        //make angularMomentum be a multiple of .25
+        angularMomentum = Math.rint(am*4) / 4;
+        velocity = v;
+        
+        visitCount = 0;
+        
+        outgoing = new ArrayList<Connection>();
+        incoming = new ArrayList<Connection>();    
+    }
+}			
 
 	
 
