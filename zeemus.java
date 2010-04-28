@@ -45,8 +45,6 @@ public class Zeemus extends AdvancedRobot
 			Direction dir = plan.getNextDirection();
 			setDirection(dir);
 			
-			//debug();
-			
 			//execute set directions
 			execute();
 			
@@ -195,8 +193,6 @@ class Planner
 	    	Location futureLoc = simulateDirection(targets.getSelf().getLastInstance(), directions.get(0)).getLocation();
 	    	//predict where they should be next timestep
 	        Location predictedTargetLoc = predictor.predictFutureLocation(timeSinceLastScan + 1, targets.getTarget());
-	                                                                                
-	        //MarkovRecurser mr = predictor.predictFutureLocationMarkov(timeSinceLastScan +1, targets.getTarget());
 	          
 	        double currentRadar = targets.getSelf().getLastInstance().getRadarHeading();
 	        double neededRadar = futureLoc.degreeTo(predictedTargetLoc);
@@ -502,7 +498,7 @@ class Predictor
 
 	public  Location getFiringPosition(int power , Location current, Target t)
 	{
-		return linearHelper(current, power, t.getLastInstance().getVelocity(), t.getLastInstance().getHeading(), 0, t.getLastLocation(), 4);	
+		return markovHelper(power, current, t);	
 	}
 	
 	//Helper method uses recursion to approximate future location
@@ -541,7 +537,19 @@ class Predictor
 	
 	public Location predictFutureLocation(int time, Target t)
 	{
-		return predictFutureLocationLinear(t.getLastLocation(), t.getLastInstance().getVelocity(), (double)time, t.getLastInstance().getHeading());
+	    MarkovRecurser mr = predictFutureLocationMarkov(time, t);
+	    
+	    Location markov = mr.getLastState().getLocation();
+
+		Location linear = predictFutureLocationLinear(t.getLastLocation(), t.getLastInstance().getVelocity(), (double)time, t.getLastInstance().getHeading());
+		
+		if(mr.probability > .3  && mr.lowestOccupiedState > 10 && mr.lowestOccupiedState < 10000){
+		    System.out.println(mr.getLastState());
+		    return markov;
+		}
+		    
+		
+		return markov;
 	}
 	
     /**
@@ -552,30 +560,63 @@ class Predictor
     *        
     */
 	
-		
+	public Location markovHelper(int power, Location current, Target t)
+	{
+	    
+	    for(int i=0; i<30; i++){
+	        Location predicted = predictFutureLocation(i, t);
+	        int bulletDistance = (20 - power*3) * i;
+	        int offset = bulletDistance - (int)current.distanceTo(predicted);
+	        if( Math.abs(offset) < 5)
+	            return predicted;              
+	    }
+	    
+	    return linearHelper(current, power, t.getLastInstance().getVelocity(), t.getLastInstance().getHeading(), 0, t.getLastLocation(), 4); 
+	    
+	}
+    
+    	
 	public MarkovRecurser predictFutureLocationMarkov(int time, Target t)
 	{
 	    MarkovRecurser mi = new MarkovRecurser(t.getLastInstance());
 	    
 	    //return the MarkovRecurser which contains the location you should fire upon
 	    //also contains the probability of a robot actually occupying that location
-	    return recurseMarkov(mi,t.mmap);
+	    return recurseMarkov(mi, t.mmap, time);
 	}
 	
-	private MarkovRecurser recurseMarkov(MarkovRecurser mr, MarkovMap map)
+	private MarkovRecurser recurseMarkov(MarkovRecurser mr, MarkovMap map, int t)
 	{
-	
-	    if(mr.states.size() > 30)
-	       return mr;
-	
-	    ArrayList<Connection> connections = map.get(mr.states.get(mr.states.size()-1));
+    	Instance current = mr.getLastState();
+    	
+	    if(mr.states.size() > t){
+            return mr;
+	    }
 	    
+	    ArrayList<Connection> connections = map.get(current);
+	    
+	    if(connections == null){
+	        System.out.println("Markov chain stopped due to null connection");
+	        return mr;
+	    }
+	    
+	    System.out.println(connections.get(0));
+	                                                                                                              
 	    //find out how many times it has been in this state
 	    int total = 0;
         for(int i=0; i<connections.size(); i++)
         {
             total += connections.get(i).size();        
         }
+        
+        if(mr.lowestOccupiedState > total)
+            mr.lowestOccupiedState = total;
+            
+        //if there is a state for which we have only been once, quit   
+	    if(mr.lowestOccupiedState < 2){
+	        System.out.println("Markov chain stopped due to state with low visit count");
+	       return mr;
+	    }
         
         //find the highest probability for the next state
         double[] probabilites = new double[connections.size()];
@@ -592,11 +633,59 @@ class Predictor
                 maxConn = connections.get(i);
             }
         }
+        //update the probability of the current chain of states
+        mr.probability *= max;
         
-        mr.states.add(maxConn.destinations.get(0));
-        return mr;
+        //get what the change of state will mean for the robot's end position
+        Instance next = maxConn.destinations.get(0);
+        Direction dir = new Direction();
+        dir.setSpeed((int)(next.getVelocity()+.5));
+        dir.setTurnRight((int)(next.getAngularMomentum()+.5));
+        
+        Instance simulated = simulateDirection(current, dir);
+        
+        //add the Instance which has the highest probability
+        // (with the simulated new position)
+        mr.states.add(simulated);
+        
+        return recurseMarkov(mr, map, t);
 	}
 	
+	//returns the simulated change a direction would cause
+	public Instance simulateDirection(Instance inst, Direction dir)
+	{
+		double heading = inst.getHeading();
+		double velocity = inst.getVelocity();
+		double x = inst.getLocation().getX();
+		double y = inst.getLocation().getY();
+		
+		//simulate turning                          
+		if(dir.getTurnRight() > 0)
+		{
+	    	heading += (10 - 	0.75*Math.abs(velocity));	
+		}
+		else if(dir.getTurnRight() < 0)
+		{
+			heading -= (10 - 0.75*Math.abs(velocity));
+		}
+			
+		//ensure heading is both positive and less than 360	
+		heading += 360;
+		heading %= 360;
+			
+		//simulate acceleration
+		velocity = dir.getSpeed();
+			
+	   	//simulate movement	
+		x += Math.sin(Math.toRadians(heading)) * velocity;
+		y += Math.cos(Math.toRadians(heading)) * velocity;
+		
+		//check for inBounds
+		x = Math.max(Math.min(x,799),0);
+		y = Math.max(Math.min(y,599),0);
+		
+		return new Instance(inst.getTime() + 1 , inst.getEnergy(), heading, velocity, inst.getRadarHeading(), inst.getGunHeading(), new Location(x,y));
+	}
 	
 }
     /**
@@ -622,6 +711,27 @@ class MarkovRecurser
         states.add(i);
         probability = 1;
         lowestOccupiedState = 10000;
+    }
+    
+    public Instance getLastState(){
+        return states.get(states.size() -1 );
+    }
+    
+    public String toString(){
+        return 
+        "\n Markov Recurser-------" +
+        "\n size:" + states.size() +
+        "\n last State------- " + 
+        "\n velocity: "+
+        getLastState().getVelocity() +
+        "\n angularMomentum: "+
+        getLastState().getAngularMomentum() +
+        "\n x: " + getLastState().getLocation().getX() + 
+		"\n y: " + getLastState().getLocation().getY() + 
+        "\n" ;       
+    
+    
+    
     }
 }
 
@@ -926,6 +1036,11 @@ class Target
 	    {
 	        Instance last = getLastInstance();
             angularMomentum = e.getHeading() - last.getHeading();
+            
+            if(angularMomentum < -180)
+		        angularMomentum += 360;
+		    if(angularMomentum > 180)
+		    	angularMomentum -= 360;
 	    }
 	    
         ilog.add(new Instance(e, loc, angularMomentum));
@@ -934,9 +1049,6 @@ class Target
         if(ilog.size() > 2)
         {
             mmap.put(getInstanceBeforeLast(), getLastInstance());
-            
-            System.out.println("total states: " + mmap.map.size());
-            System.out.println(mmap.get(getInstanceBeforeLast()).get(0));
         }
 		
 	}
@@ -1103,6 +1215,10 @@ class Location
 		if(y < loc.getY())
 			angle = (angle + 180)%360;
 		return angle;
+	}
+	
+	public double distanceTo(Location loc){
+	      return Math.sqrt(Math.pow(Math.abs(x - loc.getX()) , 2) + Math.pow(Math.abs(y - loc.getY()), 2));
 	}
 	
 	public  double getX(){
