@@ -19,10 +19,12 @@ public class Zeemus extends AdvancedRobot
 	public void run() 
 	{
 		targets = new TargetList(getName());
-	     
-		env = new Environment(getBattleFieldWidth(), getBattleFieldHeight(), targets);
-			
-		predictor = new Predictor(env);
+	    	
+		predictor = new Predictor();
+         
+		env = new Environment((int)getBattleFieldWidth(), (int)getBattleFieldHeight(), targets, predictor);
+		
+		predictor.initialize(env.getWidth(), env.getHeight());
 				
 		plan  = new Planner(targets, env, predictor);
 	      
@@ -193,6 +195,8 @@ class Planner
 	    	Location futureLoc = simulateDirection(targets.getSelf().getLastInstance(), directions.get(0)).getLocation();
 	    	//predict where they should be next timestep
 	        Location predictedTargetLoc = predictor.predictFutureLocation(timeSinceLastScan + 1, targets.getTarget());
+	                                                                                
+	        //MarkovRecurser mr = predictor.predictFutureLocationMarkov(timeSinceLastScan +1, targets.getTarget());
 	          
 	        double currentRadar = targets.getSelf().getLastInstance().getRadarHeading();
 	        double neededRadar = futureLoc.degreeTo(predictedTargetLoc);
@@ -385,21 +389,8 @@ class Planner
 	}
 	
 	//reset the map and add values to the dangerous locations
-	public void setupMap()
-	{
-		if(!targets.isEmpty())
-		{
-			for(int t = 0; t < env.getTimescale(); t++)
-			{
-				Location futureLoc = predictor.predictFutureLocation(t, targets.getTarget());
-				Location current = targets.getSelf().getLastLocation();
-				Location tloc = predictor.getFiringPosition(2, current, targets.getTarget());
-					
-				env.setupMap(t, futureLoc, tloc);
-				
-			}
-		}
-	}
+	public void setupMap(){env.setupMap();}
+	
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -490,18 +481,25 @@ class Direction
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class Predictor
 {
-	Environment env;
+	int width;
+	int height;	
 	
+	public Predictor(){};
 	
-	public Predictor(Environment e)
-	{
-		env = e;		
+	public void initialize(int w, int h)
+	{		
+	    width = w;
+	    height = h;
 	}
 	
 
-	//Linear Estimation
-	//take robot's heading, velocity, and distace to robot
-	//estimate where they will be when the bullet arrives
+    /**
+    *         Linear Estimation
+    * take robot's heading, velocity, and distace to robot
+    * estimate where they will be when the bullet arrives
+    *        
+    */
+
 	public  Location getFiringPosition(int power , Location current, Target t)
 	{
 		return linearHelper(current, power, t.getLastInstance().getVelocity(), t.getLastInstance().getHeading(), 0, t.getLastLocation(), 4);	
@@ -527,11 +525,50 @@ class Predictor
 		return linearHelper(current, power, velocity, heading, distance+priorDistance, update, recurseNum-1);
 		
 	}
+
 	
-	private Instance recurseMarkov(Target t)
+	public Location predictFutureLocationLinear(Location loc, double velocity, double time, double heading)
 	{
-	    MarkovMap map = t.mmap;
-	    ArrayList<Connection> connections = map.get(t.getLastInstance());
+		double x = loc.getX() + velocity * time * (Math.sin(Math.toRadians(heading)));
+		double y = loc.getY() + velocity * time * (Math.cos(Math.toRadians(heading)));
+		
+		x = Math.max(0, Math.min(x, width) );
+		y = Math.max(0, Math.min(y, height) );
+		
+		return new Location(x,y);
+		
+	}
+	
+	public Location predictFutureLocation(int time, Target t)
+	{
+		return predictFutureLocationLinear(t.getLastLocation(), t.getLastInstance().getVelocity(), (double)time, t.getLastInstance().getHeading());
+	}
+	
+    /**
+    *         Markov chain estimation
+    * traverse through a sequence of enemy states
+    * choose the path of maximum likelyhood
+    * (the state they have most often gone to from each previous state)    
+    *        
+    */
+	
+		
+	public MarkovRecurser predictFutureLocationMarkov(int time, Target t)
+	{
+	    MarkovRecurser mi = new MarkovRecurser(t.getLastInstance());
+	    
+	    //return the MarkovRecurser which contains the location you should fire upon
+	    //also contains the probability of a robot actually occupying that location
+	    return recurseMarkov(mi,t.mmap);
+	}
+	
+	private MarkovRecurser recurseMarkov(MarkovRecurser mr, MarkovMap map)
+	{
+	
+	    if(mr.states.size() > 30)
+	       return mr;
+	
+	    ArrayList<Connection> connections = map.get(mr.states.get(mr.states.size()-1));
 	    
 	    //find out how many times it has been in this state
 	    int total = 0;
@@ -556,42 +593,58 @@ class Predictor
             }
         }
         
-        return maxConn.destinations.get(0);
-	}
-	
-	public Location predictFutureLocationLinear(Location loc, double velocity, double time, double heading)
-	{
-		double x = loc.getX() + velocity * time * (Math.sin(Math.toRadians(heading)));
-		double y = loc.getY() + velocity * time * (Math.cos(Math.toRadians(heading)));
-		
-		x = Math.max(0, Math.min(x, env.width-.00001) );
-		y = Math.max(0, Math.min(y, env.height-.00001) );
-		
-		return new Location(x,y);
-		
-	}
-	
-	public Location predictFutureLocation(int time, Target t)
-	{
-		return predictFutureLocationLinear(t.getLastLocation(), t.getLastInstance().getVelocity(), (double)time, t.getLastInstance().getHeading());
+        mr.states.add(maxConn.destinations.get(0));
+        return mr;
 	}
 	
 	
 }
+    /**
+    *         MarkovRecurser
+    * the object which is pushed through a markov chain and used to store the 
+    * intermediate results       
+    *        
+    */
+class MarkovRecurser
+{
+    //a list of the states this robot is likely to proceed through
+    public ArrayList<Instance> states;                                
+    
+    //The probability that this location will be correct
+    public double probability;
+    
+    //the data is really only usefull if you have been in each of the traversed states 
+    //a few times before, otherwise you end up with 100% probability based on one case
+    public int lowestOccupiedState;
+    
+    public MarkovRecurser(Instance i){
+        states = new ArrayList<Instance>();
+        states.add(i);
+        probability = 1;
+        lowestOccupiedState = 10000;
+    }
+}
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/**
+    * 
+    * 
+    *
+    *        
+    */
 class Environment
 {
-	public double height;
-	public double width;
-	
-	//for painting where avoidance looks at
-	ArrayList<Location> checkedPositions = new ArrayList<Location>();
+	public int height;
+	public int width;
 
 	TargetList targets;
 	
-	Location targetingLocation;
+	Predictor predictor;
 	
+	//the location this robot thinks it should fire upon
+	Location targetingLocation;
+	//for painting where avoidance looks at
+	ArrayList<Location> checkedPositions = new ArrayList<Location>();
     //for setting up a map of dangerous locations, where a zero indicates safe and an integer
     //indicates a degree of danger
 	int[][][] hotspots;
@@ -600,12 +653,15 @@ class Environment
 	//the amount of timesteps in the map
 	//does not imply an ability to correctly predict this far, simply must always be larger than directions.size()
 	int TIMESCALE = 42;
+	//How many cells around the enemy to consider dangerous
+	int AVOIDANCE_RADIUS = 3;
   
-	public Environment(double w, double h, TargetList tl)
+	public Environment(int w, int h, TargetList tl, Predictor p)
 	{
-		height = h;
-		width = w;
+		height = (h - 1);
+		width = (w - 1);
 		targets = tl;
+		predictor = p;
 		hotspots = new int[TIMESCALE][(int)w/GRANULARITY][(int)h/GRANULARITY];	
 			
 		for(int t=0; t<TIMESCALE; t++)
@@ -615,21 +671,65 @@ class Environment
   	}
 
 	
-	//setup the map at the beginning of each timestep
-	public void setupMap(int t, Location loc, Location tloc)
+    /**
+    * Sets what positions in timestep t are dangerous
+    * Based on where the Predictor says the enemy will be it this timestep
+    */
+    
+	public void setupMap()
 	{
-		//reset all of the checked positions
+	    //reset all of the positions checked for avoiding obstacles
 		checkedPositions = new ArrayList<Location>();
+	
+		if(!targets.isEmpty())
+		{
+		    //what location to fire upon to intersect the enemies path 
+			Location current = targets.getSelf().getLastLocation();
+			targetingLocation = predictor.getFiringPosition(3, current, targets.getTarget());
 		
-		targetingLocation = tloc;
-		
-		resetMap(t);
-		
-		//set all of the Dangerous positions of the map
-		hotspots[t][(int)loc.getX()/GRANULARITY][(int)loc.getY()/GRANULARITY] += 1;
+		    //loop through each timestep and set where the enemy will be
+			for(int t = 0; t < TIMESCALE; t++)
+			{   
+            
+                resetMap(t);
+                
+			    //the enemies position at time = t
+				Location predictedLoc = predictor.predictFutureLocation(t, targets.getTarget());
+
+
+        		///////////set all of the Dangerous positions of the map
+        		int x = (int) (predictedLoc.getX()/GRANULARITY);
+        	    int y = (int) (predictedLoc.getY()/GRANULARITY);
+        		
+        		
+        		
+        		for(int i=0; i<AVOIDANCE_RADIUS; i++)
+                { 
+                  
+                    //Each line represents a direction away from the position of the enemy
+                    //i represents how far in that direction to go
+                    if(y < (height/GRANULARITY) - i)
+                        hotspots[t][x][y+i] += 1;
+                    if(y > 0 +i)
+                        hotspots[t][x][y-i] += 1;
+                    if(x < (width/GRANULARITY) - i)
+                        hotspots[t][x+i][y] += 1;
+                    if((y < (height/GRANULARITY) -i) && (x < (width/GRANULARITY) - i))
+                        hotspots[t][x+i][y+i] += 1;
+                    if((y > 0 +i) && (x < (width/GRANULARITY) - i))
+                        hotspots[t][x+i][y-i] += 1;
+                    if((x > 0 +i))
+                        hotspots[t][x-i][y] += 1; 
+                    if((y < (height/GRANULARITY) -i)  &&  (x > 0 +i))
+                        hotspots[t][x-i][y+i] += 1;
+                    if((y > 0 +i) &&  (x > 0 +i))
+                        hotspots[t][x-i][y-i] += 1;
+        		}
+			}
+		}
 	}
 	 
-	//set up so that the edges of the map are dangerous and all other indices are zero
+	//set up so that the edges of the map are dangerous and all other locations are zero
 	public void resetMap(int t)
 	{
 		for(int c=0; c< hotspots[t].length; c++)
@@ -643,22 +743,30 @@ class Environment
 			hotspots[t][hotspots[t].length-1][r] = 10;
 			}
 		}
-	} 
-			
+	}                                       
+	
+    // See if this location of the hotspot map[t][x][y] contains a non-zero		
 	public int checkMap(int t, double x, double y)
 	{
 	
-		x = Math.max(0, Math.min(x, width-.00001) );
-		y = Math.max(0, Math.min(y, height-.00001) );
+		x = Math.max(0, Math.min(x, width));
+		y = Math.max(0, Math.min(y, height));
 	   
 		checkedPositions.add(new Location(x,y));
 		return hotspots[t][(int)x/GRANULARITY][(int)y/GRANULARITY];
 	}
 		
-	public int getTimescale()
-	{
+	public int getTimescale(){
     	return TIMESCALE;
     }
+    public int getWidth(){
+        return width;
+    }
+    public int getHeight(){
+        return height;
+    }    
+    
+    
     
     //onPaint only allows a few hundred paint events 
 	public void paint(Graphics2D g)
@@ -715,8 +823,8 @@ class Environment
 		
 		//for some reason the approximation of thier location produces out of bounds numbers occasionally
 		//make sure the result is in bounds, subtract one to make sure the index never tries to access [600]
-		x = Math.max(0, Math.min(x, width-.00001) );
-		y = Math.max(0, Math.min(y, height-.00001) );
+		x = Math.max(0, Math.min(x, width));
+		y = Math.max(0, Math.min(y, height));
 		
 		return new Location(x,y);
 	}
@@ -773,7 +881,21 @@ class TargetList
 	{
 		if(isEmpty())
 			return null;
-		return tlist.get(1);
+		
+        double min = 20000;
+        int minIndex = 1;
+        
+        for(int i=1; i<tlist.size(); i++){
+        
+            long timeSinceLastSeen = tlist.get(0).getLastInstance().getTime() - tlist.get(i).getLastInstance().getTime();
+            if(tlist.get(i).getLastInstance().getDistance() < min  && timeSinceLastSeen < 20){
+            
+                min = tlist.get(i).getLastInstance().getDistance();
+                minIndex = i;
+            }
+        }
+        return tlist.get(minIndex);
+
 	}
 	
 	public Target getSelf()
@@ -936,16 +1058,16 @@ class Instance
 		"y: " + loc.getY() + "\n" +
 		"-" + "\n";
 	}
- /*	
+
 	//if this = 4, angular momentum is regarded in intervals of .25
     int RECIPROCOL_GRANULARITY_AM = 4;
      
-    public boolean equals(Instance i)
+    public boolean equals(Object o)
     {
-        int vDiff = (int)(velocity -i.velocity);
+        int vDiff = (int)(velocity -((Instance)o).velocity);
         if(vDiff == 0)
         {
-            return ((int)(angularMomentum * RECIPROCOL_GRANULARITY_AM) ==  (int)(i.angularMomentum * RECIPROCOL_GRANULARITY_AM) );
+            return ((int)(angularMomentum * RECIPROCOL_GRANULARITY_AM) ==  (int)(((Instance)o).angularMomentum * RECIPROCOL_GRANULARITY_AM) );
         }
         return false;
     }
@@ -954,16 +1076,12 @@ class Instance
    public int hashCode()
     {
         return ((int)velocity) +  (((int)(angularMomentum * RECIPROCOL_GRANULARITY_AM)) * 10);
-    }    */
-    
-    public int hashCode() { return 1; }
-    
-    public boolean equals(Instance i){return true;}
+    } 
+
 	
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//has a constructor which determines position from an onScannedEvent
 class Location
 {
 	private  double x;
@@ -1018,9 +1136,6 @@ class MarkovMap
         Connection newConn = new Connection(origin, destination);
         ArrayList<Connection> connections = new ArrayList<Connection>();
         
-        System.out.println("-----------\n" + map.containsKey(origin));
-        System.out.println(origin.hashCode());
-        
         //if the robot has already been seen in this state
         if(map.containsKey(origin))
         {
@@ -1072,17 +1187,11 @@ class Connection
         destinations.add(d);
     }
     
-    public boolean equals(Connection c)
+    public boolean equals(Object o)
     {
-        //compare the two instances which are included in this connection
-        return (origins.get(0).equals(c.origins.get(0))) && (destinations.get(0).equals(c.destinations.get(0)));
+        //if tbe origin and destination instance of one connection are both equal to their corresponding instance in the second connection
+        return (origins.get(0).equals( ((Connection)o).origins.get(0) )) && (destinations.get(0).equals( ((Connection)o).origins.get(0) ));
     }
-    
-    public int hashCode()
-    {
-        return origins.get(0).hashCode() ^ destinations.get(0).hashCode();
-    }
-
     
     public void add(Connection c)
     {
